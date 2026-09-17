@@ -1,0 +1,77 @@
+{
+  "name": "A.R.P.I.A. Visual Foundation",
+  "version": "0.1.0",
+  "status": "foundational",
+  "framework_agnostic": true,
+  "colors": {
+    "foundation": {
+      "void": "#05040D",
+      "background": "#040C1D",
+      "surface": "#0F1B30",
+      "elevated": "#16243A",
+      "border": "#233E4D",
+      "border_active": "#2B4B5D"
+    },
+    "brand": {
+      "deep": "#003F5E",
+      "primary": "#3566CC",
+      "electric": "#1B68BC",
+      "space": "#54B1DC"
+    },
+    "phenomena": {
+      "F1": {
+        "name": "IA y Capacidades Estratégicas",
+        "color": "#3566CC",
+        "semantic_role": "phenomenon"
+      },
+      "F2": {
+        "name": "Seguridad del Entorno Espacial",
+        "color": "#54B1DC",
+        "semantic_role": "phenomenon"
+      },
+      "F3": {
+        "name": "Dinámicas Territoriales",
+        "color": "#10B981",
+        "semantic_role": "phenomenon"
+      }
+    },
+    "semantic": {
+      "success": "#10B981",
+      "info": "#54B1DC",
+      "warning": "#F59E0B",
+      "critical": "#EF4444",
+      "evidence": "#F59E0B"
+    },
+    "text": {
+      "primary": "#F0F6FC",
+      "secondary": "#A1A5A9",
+      "muted": "#6A737C",
+      "disabled": "#49626F"
+    }
+  },
+  "typography": {
+    "body": {
+      "category": "sans-serif",
+      "status": "not_locked"
+    },
+    "technical": {
+      "category": "monospace",
+      "usage": [
+        "telemetry",
+        "identifiers",
+        "logs",
+        "coordinates",
+        "code-like information"
+      ],
+      "status": "selective"
+    }
+  },
+  "design_principles": [
+    "semantic_color_usage",
+    "controlled_information_density",
+    "professional_technical_visual_language",
+    "framework_independence",
+    "accessibility",
+    "incremental_evolution"
+  ]
+}

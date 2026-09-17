@@ -1,0 +1,26 @@
+services:
+  api:
+    build: .
+    ports: ["8000:8000"]
+    # .env es opcional: sin el, ARPIA_MODE cae a "stub" (ver .env.example) y
+    # la API arranca igual. Esto es lo que permite desplegar antes de tener
+    # credenciales o corpus.
+    env_file:
+      - path: .env
+        required: false
+    volumes: ["./data:/app/data:ro"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx;httpx.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  ui:
+    build: .
+    command: streamlit run src/ui/app.py --server.port 8501 --server.address 0.0.0.0
+    ports: ["8501:8501"]
+    env_file:
+      - path: .env
+        required: false
+    volumes: ["./data:/app/data:ro"]
+    depends_on: [api]

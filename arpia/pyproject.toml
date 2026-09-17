@@ -1,0 +1,41 @@
+[project]
+name = "arpia"
+version = "0.1.0"
+description = "A.R.P.I.A. — sistema multiagente de analisis aeroespacial"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+# Versiones exactas (==), no rangos: un rango que resuelve distinto entre
+# local y Coolify es una fuente de fallo que aparece tarde.
+dependencies = [
+    "streamlit==1.63.0",
+    "plotly==7.0.0",
+    "pandas==3.0.5",
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.53.0",
+    "pydantic==2.13.5",
+    "python-dotenv==1.2.3",
+    "httpx==0.28.1",
+    "langgraph==1.2.11",
+    "langchain-core==1.6.3",
+    "langchain-openai==1.6.2",
+]
+
+[project.optional-dependencies]
+# La imagen por defecto instala base + retrieval. geo se añade solo si el
+# reto lo exige (ver docs/architecture.md § Línea B).
+retrieval = ["faiss-cpu==1.15.0", "sentence-transformers==6.0.1"]
+geo = ["geopandas==1.1.4", "pydeck==0.9.3", "dateparser==1.4.3"]
+
+[dependency-groups]
+dev = ["ruff==0.16.7", "pytest==9.1.1", "pip-licenses==5.5.5"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

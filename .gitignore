@@ -1,0 +1,17 @@
+# Entornos y caches de Python (aplica a arpia/ y arpia-bundle/)
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.ropeproject
+
+# Secretos y configuracion local
+.env
+.streamlit/secrets.toml
+
+# Datos e indices: se montan, no se versionan
+data/*
+!data/.gitkeep
+*.faiss
+*.jsonl
