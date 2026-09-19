@@ -182,6 +182,24 @@ def _leer_view_spec(crudo: Any) -> ViewSpec | None:
         return None
 
 
+def _con_tope(vista: ViewSpec | None, texto: str) -> ViewSpec | None:
+    """Aplica el tope que pide la pregunta ("las 5 organizaciones") a la vista del visualizador.
+
+    El modelo no ve el campo `limite` (medido: cada campo visible mueve sus decisiones), asi que
+    el tope lo pone el codigo que lee la pregunta. No aplica a una cifra ni a una serie temporal.
+    """
+    if vista is None or vista.limite or vista.chart in ("kpi", "timeline") or vista.group_by == "anio":
+        return vista
+    try:
+        from src.agents.vista_respaldo import limite_de_pregunta
+
+        n = limite_de_pregunta(texto)
+    except Exception as exc:  # noqa: BLE001 - frontera: el tope es un detalle, nunca tumba el turno
+        log.warning("no se pudo leer el tope de la pregunta: %s", exc)
+        return vista
+    return vista.model_copy(update={"limite": n}) if n else vista
+
+
 def _vista_de_respaldo(texto: str, estado: str) -> ViewSpec | None:
     """La vista que el usuario pidio cuando el visualizador no dejo una valida. CERO tokens.
 
@@ -350,6 +368,7 @@ def _turno(texto: str, session_id: str) -> AgentResponse:
 
     if view_spec is None and not s.is_stub:
         view_spec = _vista_de_respaldo(texto, estado)
+    view_spec = _con_tope(view_spec, texto)
 
     vistas, hallazgos = _componer_tablero(view_spec)
     construida = _build(

@@ -389,3 +389,14 @@ def test_agentes_invocados_incluye_a_los_que_no_gastan_tokens(live):
     assert "agente_qa" in meta["agentes_invocados"]  # gasto tokens
     assert "agente_analitico" in meta["agentes_invocados"]  # no gasto ninguno
     assert [a["agente"] for a in meta["tokens_por_agente"]] == ["agente_qa"]
+
+
+def test_el_tope_de_la_pregunta_llega_a_la_vista_que_emitio_el_visualizador(live):
+    client, _ = live(GrafoConVista())
+    body = _chat(client, "las 3 organizaciones que mas publican en barras").json()
+    assert body["view_spec"]["limite"] == 3
+
+
+def test_sin_tope_en_la_pregunta_la_vista_no_se_recorta(live):
+    client, _ = live(GrafoConVista())
+    assert _chat(client, "las organizaciones que mas publican").json()["view_spec"]["limite"] is None
