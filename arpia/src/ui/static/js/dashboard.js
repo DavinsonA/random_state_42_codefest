@@ -33,13 +33,6 @@ Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
 Chart.defaults.maintainAspectRatio = false;
 Chart.defaults.plugins.legend.labels.boxWidth = 10;
 
-function el(etiqueta, clase, texto) {
-    const nodo = document.createElement(etiqueta);
-    if (clase) nodo.className = clase;
-    if (texto !== undefined && texto !== null) nodo.textContent = String(texto);
-    return nodo;
-}
-
 function marcarPanel(idPanel, origen, nota) {
     const panel = $(idPanel);
     const insignia = panel.querySelector(".insignia-panel");
@@ -409,3 +402,4 @@ setInterval(refrescarSalud, 60000);
 // Vista enviada desde el chat ("Abrir en el tablero").
 const inicial = vistaDesdeHash();
 if (inicial) aplicarVista(inicial);
+
