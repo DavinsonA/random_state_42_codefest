@@ -43,8 +43,8 @@ src/
 ├── tools/                tools del agente + registry con traza
 ├── agents/               estado + grafo LangGraph
 ├── api/
-│   ├── contracts.py       ÚNICO lugar con los esquemas Pydantic (envoltura congelada)
-│   └── main.py             endpoints: /health /analyze /retrieve /usage
+│   ├── contracts.py       ÚNICO lugar con los esquemas Pydantic (formato ADL de /chat)
+│   └── main.py             endpoints: /chat /topics /health /usage
 └── ui/                   Streamlit
 
 docs/
@@ -60,7 +60,7 @@ tests/                    pytest — incluye tests de contrato de la API
 | Regla | Dónde se verifica |
 |---|---|
 | Ningún color hexadecimal fuera de `src/theme/` | `tests/test_theme.py` |
-| El contrato HTTP no cambia sin querer | `tests/test_contracts.py` |
+| El contrato HTTP no cambia sin querer | `tests/test_contract.py` |
 | Ningún secreto ni dependencia copyleft | `../arpia-bundle/scripts/preflight.py` |
 
 ## Licencia

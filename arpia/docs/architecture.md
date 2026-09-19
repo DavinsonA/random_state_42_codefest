@@ -11,7 +11,7 @@
 
 ```
                  ┌──────────────────────────────┐
-  consulta ─────►│  API (FastAPI) /analyze      │◄──── pipeline del jurado
+  consulta ─────►│  API (FastAPI) /chat         │◄──── pipeline del jurado
                  └──────────────┬───────────────┘
                                 │
                  ┌──────────────▼───────────────┐
@@ -142,12 +142,18 @@ La primera describe lo que el sistema hace; la segunda, para qué sirve y el ter
 ## 7. Contrato de API
 
 `src/api/contracts.py` es el único lugar donde viven los esquemas Pydantic
-de entrada/salida. Congelado: la envoltura común (`schema_version`, `mode`,
-`elapsed_ms`, `warnings`), `HealthResponse`, `UsageResponse`, el formato de
-span/traza, y la invariante de que ningún endpoint devuelve 500 por un fallo
-de dependencia externa — siempre 200 con `warnings` poblado. No congelado:
-`AnalyzePayload` y `RetrievePayload`, que dependen del reto y se redefinen
-el 18 de septiembre.
+de entrada/salida. El contrato lo fija la especificación técnica de ADL
+(Etapa 2, §2.4), no el equipo:
+
+- `POST /chat` — entrada `ChatRequest` (texto + `sesion_id` opcional, con
+  alias tolerantes) y salida `ChatResponse` en el formato exacto de ADL:
+  `respuesta`, `evaluacion`, `metadata`.
+- `GET /topics` — uso interno del frontend (no lo evalúa ADL).
+- `GET /health` y `GET /usage` — operación.
+
+Invariante: ningún endpoint devuelve 500 por un fallo de dependencia externa;
+se responde 200 y el fallo se reporta en `metadata.estado`. Congelado: los
+nombres y tipos de `ChatResponse`.
 
 ### Romper un contrato congelado
 
@@ -155,9 +161,8 @@ Congelado significa "cuesta romperlo", no "es imposible". Si hace falta:
 
 1. Lo autoriza el arquitecto del equipo — no se rompe unilateralmente en
    medio de una tarea.
-2. Se actualizan juntos, en el mismo cambio: `contracts.py`, `schema_version`
-   (incrementar, p. ej. `"1.0"` → `"1.1"`), los tests de
-   `tests/test_contracts.py`, y se avisa al equipo (el jurado consume el
+2. Se actualizan juntos, en el mismo cambio: `contracts.py`, los tests de
+   `tests/test_contract.py`, y se avisa al equipo (el jurado consume el
    contrato desplegado, no el repositorio).
 3. Se registra en un ADR de una línea en `docs/decisions/`: qué cambió, por
    qué, y quién lo autorizó.

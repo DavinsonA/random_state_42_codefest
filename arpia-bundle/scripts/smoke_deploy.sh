@@ -7,7 +7,7 @@
 #
 # Uso: scripts/smoke_deploy.sh https://arpia.mi-dominio.com
 #
-# Golpea /health, /analyze y /usage; valida codigo HTTP y forma minima de la
+# Golpea /health, /chat y /usage; valida codigo HTTP y forma minima de la
 # respuesta; imprime un resumen legible. Sale con codigo != 0 si algo falla.
 
 set -u
@@ -93,11 +93,9 @@ echo
 check_endpoint "health" GET "/health" "" \
   "'status' in data and 'mode' in data and 'tools_registered' in data and 'max_iterations' in data"
 
-check_endpoint "analyze" POST "/analyze" '{"query": "smoke test de despliegue"}' \
-  "all(k in data for k in ('query','answer','evidence','warnings','trace','tokens_used','elapsed_ms','mode')) and 'trace_id' in data.get('trace', {}) and isinstance(data['trace'].get('spans'), list)"
+check_endpoint "chat" POST "/chat" '{"texto": "smoke test de despliegue"}'   "all(k in data for k in ('respuesta','evaluacion','metadata')) and all(k in data['evaluacion'] for k in ('input','actual_output')) and all(k in data['metadata'] for k in ('num_interacciones','agentes_invocados','tokens','latencia_ms','estado')) and data['metadata']['tokens']['total'] >= 0"
 
-check_endpoint "usage" GET "/usage" "" \
-  "'session' in data and 'total_tokens' in data.get('session', {})"
+check_endpoint "usage" GET "/usage" ""   "all(k in data for k in ('requests','llm_calls','input_tokens','output_tokens'))"
 
 if [[ "$FAILED" -ne 0 ]]; then
   echo "==> smoke test FALLIDO"

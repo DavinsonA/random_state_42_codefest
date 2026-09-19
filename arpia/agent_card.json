@@ -1,0 +1,113 @@
+{
+  "agente": {
+    "nombre": "A.R.P.I.A.",
+    "descripcion": "Asistente de analisis de fuentes abiertas sobre el corpus de los tres fenomenos del reto (inteligencia artificial en entornos militares, seguridad espacial y orbita baja terrestre, dinamicas territoriales en America Latina). Responde preguntas en lenguaje natural con evidencia citada y genera o actualiza visualizaciones del tablero a partir de instrucciones del usuario.",
+    "version": "1.0.0",
+    "endpoint": "https://agent.random-state-42.codefest2026.augusta.avaldigitallabs.com/chat",
+    "input_modes": ["text/plain"],
+    "output_modes": ["application/json"]
+  },
+
+  "orquestador": {
+    "nombre": "Orquestador A.R.P.I.A.",
+    "descripcion": "Recibe la consulta del usuario y decide a que agente especializado delegarla: al agente documental si la pregunta requiere evidencia textual del corpus, al agente visualizador si el usuario pide ver, comparar o filtrar datos en el tablero, o a ambos si la consulta lo requiere. Mantiene el hilo conversacional y consolida la respuesta final. No responde preguntas de contenido por si mismo.",
+    "modelo": "gpt-oss-120b",
+    "proveedor": "openai",
+    "tools": [
+      {
+        "name": "delegar_documental",
+        "descripcion": "Delega la consulta al agente documental cuando la respuesta requiere evidencia textual del corpus: hechos, cifras, declaraciones, descripciones de eventos o actores.",
+        "input_parameters": { "consulta": "string", "fenomeno": "string" }
+      },
+      {
+        "name": "delegar_visualizacion",
+        "descripcion": "Delega al agente visualizador cuando el usuario pide ver, graficar, mapear, comparar en el tiempo o filtrar datos en el tablero.",
+        "input_parameters": { "instruccion": "string" }
+      }
+    ]
+  },
+
+  "subagentes": [
+    {
+      "id": "agente_documental",
+      "nombre": "Agente documental",
+      "descripcion": "Responde preguntas en lenguaje natural sobre el corpus recuperando fragmentos del indice vectorial construido en la Etapa 1. Toda afirmacion se sustenta en fragmentos recuperados y se cita con su doc_id y chunk_id. Si tras varias busquedas no encuentra evidencia, lo declara explicitamente en vez de completar con conocimiento general.",
+      "modelo": "llama-3.3-70b-instruct",
+      "proveedor": "meta",
+      "activado_por": "orquestador",
+      "ejemplos_de_activacion": [
+        "Que reporta el corpus sobre capacidades antisatelite en 2024?",
+        "Como difiere el enfoque de dos paises frente a la orbita baja terrestre?",
+        "Que actores aparecen asociados a dinamicas territoriales en la frontera?"
+      ],
+      "tools": [
+        {
+          "name": "buscar_corpus",
+          "descripcion": "Busca fragmentos relevantes en el indice vectorial. Una sola idea por consulta: para comparar dos temas se hacen dos busquedas separadas. No repite una consulta ya lanzada en el mismo turno.",
+          "input_parameters": { "query": "string", "k": "integer", "fenomeno": "string" }
+        },
+        {
+          "name": "detalle_documento",
+          "descripcion": "Devuelve la metadata de procedencia de documentos ya identificados por una busqueda previa: fuente, formato, fenomeno e idioma. No sirve para descubrir documentos nuevos.",
+          "input_parameters": { "doc_ids": "string" }
+        }
+      ]
+    },
+
+    {
+      "id": "agente_visualizador",
+      "nombre": "Agente generador de visualizaciones",
+      "descripcion": "Traduce la instruccion en lenguaje natural del usuario a una especificacion de vista validada contra esquema cerrado, decidiendo que componente del tablero activar y con que filtros poblarlo. No ejecuta codigo arbitrario ni consultas SQL libres: emite unicamente una estructura declarativa que el tablero renderiza.",
+      "modelo": "gpt-oss-20b",
+      "proveedor": "openai",
+      "activado_por": "orquestador",
+      "ejemplos_de_activacion": [
+        "Muestrame la evolucion del fenomeno 2 entre 2023 y 2025",
+        "Ponme en el mapa los lugares asociados a dinamicas territoriales",
+        "Compara el volumen documental de los tres fenomenos por trimestre"
+      ],
+      "tools": [
+        {
+          "name": "componentes_disponibles",
+          "descripcion": "Devuelve el catalogo de componentes del tablero y las dimensiones y metricas realmente disponibles, para no proponer una vista que no puede renderizarse.",
+          "input_parameters": {}
+        },
+        {
+          "name": "emitir_view_spec",
+          "descripcion": "Emite la especificacion de vista que el tablero debe renderizar: tipo de componente, fenomenos, rango temporal, lugar y agrupacion. Validada contra esquema cerrado.",
+          "input_parameters": {
+            "chart": "string",
+            "fenomenos": "string",
+            "desde": "string",
+            "hasta": "string",
+            "group_by": "string"
+          }
+        }
+      ]
+    },
+
+    {
+      "id": "agente_analitico",
+      "nombre": "Agente analitico",
+      "descripcion": "AGENTE ADICIONAL (puntos extra). Responde preguntas cuantitativas sobre la metadata agregada: conteos, distribuciones, tendencias y comparaciones entre fenomenos. Consulta una tabla estructurada, no el indice vectorial: contar mediante busqueda semantica produce cifras que parecen correctas y no lo son.",
+      "modelo": "gpt-oss-20b",
+      "proveedor": "openai",
+      "activado_por": "orquestador",
+      "ejemplos_de_activacion": [
+        "Cuantos documentos hay por fenomeno?",
+        "En que trimestre hubo mas actividad documental sobre seguridad espacial?"
+      ],
+      "tools": [
+        {
+          "name": "consultar_agregado",
+          "descripcion": "Ejecuta una agregacion parametrizada sobre la tabla de metadata enriquecida y devuelve el resultado exacto con los doc_id que lo sustentan.",
+          "input_parameters": {
+            "metrica": "string",
+            "group_by": "string",
+            "filtros": "string"
+          }
+        }
+      ]
+    }
+  ]
+}
