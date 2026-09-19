@@ -284,3 +284,26 @@ def test_el_catalogo_del_visualizador_no_cambia():
     from src.tools.analytics import componentes_disponibles
 
     assert "reglas" not in json.loads(componentes_disponibles())
+
+
+# -- limite: "las 5 organizaciones" -------------------------------------------------
+
+
+def test_el_limite_recorta_a_las_categorias_de_mayor_total_y_lo_declara():
+    r = _view(chart="table", group_by="organizacion", fenomenos=["F3"], limite=2)
+    assert r["categorias"] == ["Alertas", "SIPRI"]
+    assert r["categorias_omitidas"] == 3
+
+
+def test_el_limite_no_aplica_a_la_serie_temporal():
+    assert len(_view(chart="timeline", limite=1)["categorias"]) == 2
+
+
+def test_un_limite_fuera_de_rango_es_un_error_legible():
+    assert _view(chart="table", group_by="organizacion", limite=500)["disponible"] is False
+
+
+def test_el_limite_no_esta_en_el_esquema_que_ve_el_visualizador():
+    from src.api.contracts import ViewSpec
+
+    assert "limite" not in ViewSpec.model_json_schema()["properties"]

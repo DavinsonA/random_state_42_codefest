@@ -39,6 +39,13 @@ def _pagina(host: str) -> str:
     return "dashboard.html" if host.lower().startswith(DASHBOARD_HOST_PREFIX) else "chat.html"
 
 
+#: Los estaticos se revalidan en cada carga (ETag: si no cambiaron, un 304 sin cuerpo).
+#: Sin esto el navegador reutiliza modulos JS viejos tras un despliegue, y el tablero
+#: ejecuta codigo que ya no corresponde al backend hasta que alguien fuerza la recarga.
+_REVALIDAR = {"Cache-Control": "no-cache"}
+_ESTATICOS = (".js", ".mjs", ".css", ".html")
+
+
 def _aviso(nombre: str) -> HTMLResponse:
     """Degradacion cuando el HTML aun no esta en la imagen.
 
@@ -69,9 +76,11 @@ def install(app: FastAPI) -> None:
             nombre = _pagina(request.headers.get("host", ""))
             archivo = STATIC_DIR / nombre
             if archivo.is_file():
-                return FileResponse(archivo, media_type="text/html")
+                return FileResponse(archivo, media_type="text/html", headers=_REVALIDAR)
             return _aviso(nombre)
         response: Response = await call_next(request)
+        if request.method in ("GET", "HEAD") and request.url.path.endswith(_ESTATICOS):
+            response.headers["Cache-Control"] = _REVALIDAR["Cache-Control"]
         return response
 
     if STATIC_DIR.is_dir():

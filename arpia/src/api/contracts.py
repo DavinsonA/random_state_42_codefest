@@ -299,6 +299,9 @@ class ViewSpec(BaseModel):
     # dato mal filtrado. Se valida y funciona en el API, el tablero y el
     # compositor; darselo al modelo es una decision que se toma midiendo.
     serie_por: SkipJsonSchema[GroupBy | None] = None
+    # Tope de categorias ("las 5 organizaciones"). Oculto al modelo por la misma razon que
+    # `serie_por`: lo pone el codigo que lee la pregunta, no el visualizador.
+    limite: SkipJsonSchema[int | None] = Field(None, ge=1, le=25)
 
     @model_validator(mode="after")
     def _serie_por_coherente(self) -> ViewSpec:

@@ -16,7 +16,7 @@
 // No hay mapa: el corpus no trae ubicacion (GET /api/geo lo declara), y un
 // mapa geocodificado a ojo seria una afirmacion falsa con autoridad visual.
 
-import { enviarChat, obtenerGeo, obtenerSalud } from "./api.js";
+import { enviarChat, obtenerSalud } from "./api.js";
 import {
     FENOMENOS,
     NOMBRE_CHART,
@@ -29,7 +29,7 @@ import {
     vistasDesdeHash,
 } from "./viewspec.js";
 import { conIdioma, mensajeError, montarSelector, t } from "./i18n.js";
-import { descargarInforme } from "./informe.js";
+import { capturarGraficas, descargarInforme } from "./informe.js";
 import { abrirVisor, enlazarReferencias } from "./referencias.js";
 import { conTransicion, paginaLista, suavizarEnlace } from "./transiciones.js";
 
@@ -54,19 +54,24 @@ const tok = (nombre) => css.getPropertyValue(`--arpia-${nombre}`).trim();
 const colorFenomeno = (f) => tok({ F1: "f1", F2: "f2", F3: "f3" }[f] || "space");
 const etiquetaFenomeno = (f) => (FENOMENOS[f] ? `${f} · ${FENOMENOS[f]}` : f);
 
-/** Mezcla dos colores de token (`#RRGGBB`): 0 = `a`, 1 = `b`. */
-function mezclar(a, b, k) {
-    const c = (hex, i) => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16);
-    const canal = (i) => Math.round(c(a, i) + (c(b, i) - c(a, i)) * k).toString(16).padStart(2, "0");
-    return `#${canal(0)}${canal(1)}${canal(2)}`;
+/** Tono (0-360) de un color de token `#RRGGBB`. */
+function tonoDe(hex) {
+    const [r, g, b] = [0, 1, 2].map((i) => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16) / 255);
+    const max = Math.max(r, g, b);
+    const d = max - Math.min(r, g, b);
+    if (!d) return 0;
+    const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
 }
 
 /** `n` colores distinguibles para categorias que no son fenomenos (organizaciones, formatos...).
- *  Salen de los tonos de marca, aclarados en cada vuelta: los colores de F1-F3 y los semanticos
- *  (advertencia, critico) quedan reservados a lo que significan. */
+ *  Parten del tono de marca (`--arpia-primary`) y giran por el circulo cromatico: con tonos de una
+ *  sola familia, cinco lineas de una serie temporal no se distinguen. Hasta 8 categorias giran 47
+ *  grados; con mas, el circulo se reparte y se alterna la luminosidad. */
 function paletaCategorica(n) {
-    const marca = [tok("primary"), tok("space"), tok("electric")];
-    return Array.from({ length: n }, (_, i) => mezclar(marca[i % marca.length], tok("text"), 0.22 * Math.floor(i / marca.length)));
+    const base = tonoDe(tok("primary"));
+    const paso = n <= 8 ? 47 : 360 / n;
+    return Array.from({ length: n }, (_, i) => `hsl(${Math.round((base + paso * i) % 360)} 62% ${n > 8 && i % 2 ? 46 : 60}%)`);
 }
 
 Chart.defaults.color = tok("text-secondary");
@@ -78,7 +83,15 @@ Chart.defaults.plugins.legend.labels.boxWidth = 10;
 // Animacion de los graficos: corta y con salida suave. Si el sistema pide
 // reducir movimiento, no se anima.
 const REDUCIR_MOVIMIENTO = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-Chart.defaults.animation = REDUCIR_MOVIMIENTO ? false : { duration: 650, easing: "easeOutQuart" };
+// Se MUTA `defaults.animation`, no se reemplaza: al sustituirlo entero se perdia la
+// configuracion por defecto de las animaciones de color, y cada grafico lanzaba
+// `this._fn is not a function` al animar `backgroundColor` y `borderColor`.
+if (REDUCIR_MOVIMIENTO) {
+    Chart.defaults.animation = false;
+} else {
+    Chart.defaults.animation.duration = 650;
+    Chart.defaults.animation.easing = "easeOutQuart";
+}
 
 // =============================================================================
 // RENDERIZADORES: cada uno dibuja en `cont` y devuelve su funcion de limpieza
@@ -295,53 +308,14 @@ function dibujarRelaciones(cont, { nodos }) {
 // la version desplegada. No se aceptan datos simulados o inventados en el
 // tablero final". El prototipo abria con series, marcadores de mapa y nodos de
 // ejemplo; se cambiaron por lo unico defendible: las dos vistas que el corpus
-// si sostiene, cargadas de verdad, y una declaracion explicita en las dos que
-// no.
-//
-// Un panel que dice "no hay este dato y por que" es informacion. Un panel con
-// tres puntos sobre Colombia que nadie extrajo del corpus es una afirmacion
-// falsa con autoridad visual, y es lo primero que se cae si el jurado pregunta
-// de donde salio.
+// si sostiene, cargadas de verdad. Igual que en `main`, el tablero abre solo
+// con esas dos: sin paneles de mapa ni de relaciones, que el corpus no tiene.
 
-/** El mapa no existe, y el backend explica por que. */
-async function vistaMapaSinDato() {
-    let texto;
-    try {
-        const g = await obtenerGeo();
-        // El backend manda dos frases sin puntuacion final ni mayuscula inicial.
-        const frases = [g.motivo, g.alternativa]
-            .filter(Boolean)
-            .map((f) => f.trim().replace(/[.\s]+$/, ""))
-            .map((f) => f[0].toUpperCase() + f.slice(1));
-        texto = frases.length ? `${frases.join(". ")}.` : t("tablero.mapa.sinDatos");
-    } catch {
-        texto = t("tablero.mapa.sinDatos");
-    }
-    return {
-        titulo: t("tablero.mapa"),
-        origen: "sin_datos",
-        nota: "",
-        dibujar: mensaje(texto),
-    };
-}
-
-/** Las relaciones necesitan el grafo de conocimiento, que era opcional en la
- *  Etapa 1 y no forma parte de esta base. */
-function vistaRelacionesSinDato() {
-    return {
-        titulo: t("tablero.relaciones"),
-        origen: "sin_datos",
-        nota: "",
-        dibujar: mensaje(t("tablero.relaciones.sinDatos")),
-    };
-}
-
-/** Lo que se ve al abrir el tablero: dos vistas reales y dos declaraciones. */
+/** Lo que se ve al abrir el tablero: las dos vistas reales del corpus. */
 async function vistasIniciales() {
-    const conDatos = await Promise.all(
+    return Promise.all(
         [VISTA_TIEMPO_INICIAL, VISTA_INICIAL].map((spec) => vistaDelAgente(spec, { inicial: true })),
     );
-    return [...conDatos, await vistaMapaSinDato(), vistaRelacionesSinDato()];
 }
 
 // =============================================================================
@@ -366,19 +340,26 @@ const legible = (g) => String(g ?? "").replace(/_/g, " ") || t("tablero.sinDato"
 /** Elige y prepara el renderizador para el tipo de grafico que pidio el agente. */
 function dibujanteDe(spec, filas, total) {
     const etiqueta = spec.titulo || tituloPorDefecto(spec);
-    const fens = [...new Set(filas.map((f) => f.fenomeno).filter(Boolean))].sort();
+    // Series: una por fenomeno, salvo que la vista pida cruzar por otra dimension (`serie_por`).
+    const claveSerie = (f) => f.serie ?? f.fenomeno;
+    const cruzada = Boolean(spec.serie_por) && spec.serie_por !== "fenomeno";
+    const claves = [...new Set(filas.map(claveSerie).filter(Boolean))];
+    const fens = cruzada ? claves : claves.sort();
+    const colores = cruzada ? paletaCategorica(fens.length) : [];
+    const etiquetaSerie = (k) => (cruzada ? legible(k) : etiquetaFenomeno(k));
+    const colorSerie = (k) => (cruzada ? colores[fens.indexOf(k)] : colorFenomeno(k));
     const porFenomeno = () => agrupar(filas, (f) => f.fenomeno || String(f.grupo)).sort((a, b) => a.k.localeCompare(b.k));
 
     switch (spec.chart) {
         case "timeline": {
             const anios = [...new Set(filas.map((f) => f.grupo).filter((g) => /^\d{4}$/.test(g)))].sort();
             const series = fens.map((fen) => {
-                const m = new Map(filas.filter((f) => f.fenomeno === fen).map((f) => [f.grupo, f]));
+                const m = new Map(filas.filter((f) => claveSerie(f) === fen).map((f) => [f.grupo, f]));
                 return {
-                    label: etiquetaFenomeno(fen),
-                    color: colorFenomeno(fen),
+                    label: etiquetaSerie(fen),
+                    color: colorSerie(fen),
                     valores: anios.map((a) => m.get(a)?.valor ?? 0),
-                    meta: anios.map((a) => ({ titulo: `${a} · ${fen}`, doc_ids: m.get(a)?.doc_ids || [] })),
+                    meta: anios.map((a) => ({ titulo: `${a} · ${legible(fen)}`, doc_ids: m.get(a)?.doc_ids || [] })),
                 };
             });
             const memoria = { tipo: "linea" };
@@ -422,7 +403,7 @@ function dibujanteDe(spec, filas, total) {
 
         default: {
             // bar / stacked_bar. Por fenomeno: una barra por fenomeno con su color.
-            if (spec.group_by === "fenomeno") {
+            if (spec.group_by === "fenomeno" && !spec.serie_por) {
                 const grupos = porFenomeno();
                 return (c) => dibujarBarras(c, {
                     etiqueta,
@@ -441,12 +422,12 @@ function dibujanteDe(spec, filas, total) {
                 .slice(0, MAX_CATEGORIAS)
                 .map((g) => g.k);
             const series = fens.map((fen) => {
-                const m = new Map(filas.filter((f) => f.fenomeno === fen).map((f) => [f.grupo, f]));
+                const m = new Map(filas.filter((f) => claveSerie(f) === fen).map((f) => [f.grupo, f]));
                 return {
-                    label: etiquetaFenomeno(fen),
-                    color: colorFenomeno(fen),
+                    label: etiquetaSerie(fen),
+                    color: colorSerie(fen),
                     valores: categorias.map((k) => m.get(k)?.valor ?? 0),
-                    meta: categorias.map((k) => ({ titulo: `${legible(k)} · ${fen}`, doc_ids: m.get(k)?.doc_ids || [] })),
+                    meta: categorias.map((k) => ({ titulo: `${legible(k)} · ${legible(fen)}`, doc_ids: m.get(k)?.doc_ids || [] })),
                 };
             });
             return (c) => dibujarBarras(c, {
@@ -709,7 +690,7 @@ function mostrarRespuesta(datos) {
     if (boton) {
         boton.hidden = false;
         boton.onclick = () =>
-            descargarInforme(estado.ultimaPregunta || "", datos, { vistas: estado.specs || [] });
+            descargarInforme(estado.ultimaPregunta || "", datos, { graficas: capturarGraficas(document, tok("surface")) });
     }
 
     // Las citas del texto se vuelven interactivas: al pulsarlas abren el
