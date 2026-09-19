@@ -27,7 +27,7 @@ from fastapi.responses import JSONResponse
 from src.agents import checkpoint
 from src.agents.card import agent_ids, load_card
 from src.api import chat as chat_mod
-from src.api import routing, session
+from src.api import dashboard, routing, session
 from src.api.contracts import AgentResponse, HealthResponse, UsageResponse
 from src.config import get_logger, get_settings
 from src.observability import tracing, usage
@@ -206,7 +206,7 @@ def usage_endpoint() -> UsageResponse:
     funcionar. Este numero es solo lo que el propio proceso observo, no la
     facturacion real (esa la manda el dashboard de LiteLLM).
     """
-    from src.agents import memory
+    from src.agents import memory, verifier
 
     summary = usage.usage_summary()
     return UsageResponse(
@@ -216,8 +216,13 @@ def usage_endpoint() -> UsageResponse:
         output_tokens=summary["output_tokens"],
         trace_count=tracing.trace_count(),
         cache=memory.cache.stats(),
+        verificador=verifier.contador.stats(),
     )
 
+
+# Endpoints del tablero (Reto 2). Antes del montaje estatico, que captura todo
+# lo que no case con una ruta declarada.
+app.include_router(dashboard.router)
 
 # Al final a proposito: el montaje de `static/` debe quedar DESPUES de las
 # rutas de la API para no capturarlas.

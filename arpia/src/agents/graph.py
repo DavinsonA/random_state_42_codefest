@@ -1,6 +1,7 @@
 """Grafo agentico de A.R.P.I.A.: plan unico, delegacion y una replanificacion.
 
-    START -> begin -> planificar -> ejecutar -> (replanificar una vez) -> componer -> END
+    START -> begin -> planificar -> ejecutar -> (replanificar una vez)
+          -> componer -> verificar -> END
 
 **Por que esto y no ReAct.** El bucle razonar-herramienta-observar hace un numero
 impredecible de llamadas al modelo por pregunta. El Bloque B de `RETO.md`
@@ -30,7 +31,7 @@ from typing import Any, Literal
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langgraph.graph import END, START, StateGraph
 
-from src.agents import executors, orchestrator
+from src.agents import executors, orchestrator, verifier
 from src.agents.memory import VENTANA_TURNOS
 from src.agents.plan import MAX_REPLANES, Paso, Plan
 from src.agents.state import TURNO_LIMPIO, AgentState
@@ -208,6 +209,25 @@ def componer(state: AgentState) -> dict[str, Any]:
     return {"answer": texto, "messages": [AIMessage(content=texto)]}
 
 
+def verificar(state: AgentState) -> dict[str, Any]:
+    """Contrasta la respuesta contra su evidencia. CERO tokens si esta sana.
+
+    La deteccion es una comparacion de conjuntos entre los identificadores
+    citados y los recuperados: no cuesta nada. Solo se paga una llamada cuando
+    esa comparacion falla, que es el unico caso en que hay algo que arreglar.
+    """
+    original = state.get("answer") or ""
+    corregida = verifier.verificar(original, state.get("evidence") or [])
+    if corregida == original:
+        return {}
+
+    mensajes = state.get("messages") or []
+    borrar = []
+    if mensajes and getattr(mensajes[-1], "id", None):
+        borrar = [RemoveMessage(id=mensajes[-1].id)]
+    return {"answer": corregida, "messages": [*borrar, AIMessage(content=corregida)]}
+
+
 # -- aristas ----------------------------------------------------------------
 
 
@@ -245,6 +265,7 @@ def build_graph(checkpointer: Any = None):
     g.add_node("planificar", planificar)
     g.add_node("ejecutar", ejecutar)
     g.add_node("componer", componer)
+    g.add_node("verificar", verificar)
 
     g.add_edge(START, "begin")
     g.add_edge("begin", "planificar")
@@ -252,7 +273,8 @@ def build_graph(checkpointer: Any = None):
     g.add_conditional_edges(
         "ejecutar", tras_ejecutar, {"planificar": "planificar", "componer": "componer"}
     )
-    g.add_edge("componer", END)
+    g.add_edge("componer", "verificar")
+    g.add_edge("verificar", END)
 
     return g.compile(checkpointer=checkpointer or None)
 

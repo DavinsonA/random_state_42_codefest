@@ -277,7 +277,7 @@ def analitico(paso: Paso) -> Resultado:
     if cobertura["sin_dato_en_la_dimension"]:
         aviso = (
             f"\n\n{cobertura['sin_dato_en_la_dimension']} de "
-            f"{cobertura['documentos_filtrados']} documentos no declaran "
+            f"{cobertura['documentos_en_dimension']} documentos no declaran "
             f"{group_by} y quedan fuera de este conteo."
         )
     return Resultado(
@@ -289,7 +289,7 @@ def analitico(paso: Paso) -> Resultado:
                 "doc_id": ", ".join(f["doc_ids"][:3]),
                 "texto": f"{f['clave']}: {f['valor']} {unidad}",
                 "score": 1.0,
-                "citacion": f"conteo exacto sobre {cobertura['documentos_filtrados']} documentos",
+                "citacion": f"conteo exacto sobre {cobertura['documentos_contados']} documentos",
             }
             for f in filas[:10]
         ],

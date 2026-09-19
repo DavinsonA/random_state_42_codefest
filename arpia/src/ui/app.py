@@ -53,17 +53,37 @@ if query:
                 unsafe_allow_html=True,
             )
     else:
+        from uuid import uuid4
+
         from src.agents.graph import build_graph
+        from src.observability import tracing, turnlog, usage
         from src.tools.registry import registry
 
+        # Un hilo por sesion de Streamlit: el grafo compila con checkpointer y
+        # exige `thread_id`. Sin esto la memoria conversacional no tiene donde
+        # colgar el historial y `invoke` falla.
+        if "sesion_id" not in st.session_state:
+            st.session_state.sesion_id = uuid4().hex
+
         registry.reset()
+        tracing.start_trace()
+        usage.start_request()
+        turnlog.start_turn()
         with st.spinner("Analizando..."):
-            result = build_graph().invoke({"question": query, "turns": 0})
+            result = build_graph().invoke(
+                {"question": query},
+                {"configurable": {"thread_id": st.session_state.sesion_id}},
+            )
 
         st.subheader("Respuesta")
         st.write(result.get("answer", ""))
 
+        gasto = usage.request_usage()
+        col_a, col_b = st.columns([1, 1])
+        col_a.metric("Llamadas al modelo", gasto["calls"])
+        col_b.metric("Tokens del turno", gasto["total_tokens"])
+
         with st.expander("Traza de ejecucion"):
-            st.json(registry.trace())
+            st.json(tracing.to_spans())
 else:
     st.caption("Introduce una consulta para comenzar.")

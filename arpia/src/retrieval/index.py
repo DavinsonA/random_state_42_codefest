@@ -208,6 +208,33 @@ class VectorIndex:
                 encontrados[doc_id] = enrich(self._row_at(offset))
         return encontrados
 
+    def chunk(self, chunk_id: str) -> dict[str, Any] | None:
+        """Un fragmento concreto por su `chunk_id`. None si no existe.
+
+        Sin mapa en memoria: los `chunk_id` tienen la forma
+        `{doc_id}__chunk_{n}` y el JSONL esta agrupado por documento, asi que se
+        salta al primer fragmento del documento y se avanza hasta encontrarlo.
+        Un diccionario de 326.866 claves costaria ~40 MB para responder a un
+        endpoint que el tablero usa al hacer clic en una cita.
+        """
+        self._load()
+        doc_id = chunk_id.split("__chunk_")[0]
+        offset = self._doc_offsets.get(doc_id)
+        if offset is None:
+            return None
+
+        total = self._doc_chunks.get(doc_id, 0)
+        with self._lock:
+            assert self._fh is not None
+            self._fh.seek(offset)
+            for _ in range(total):
+                linea = self._fh.readline()
+                if not linea:
+                    break
+                if chunk_id.encode("utf-8") in linea:
+                    return enrich(json.loads(linea))
+        return None
+
     def document_table(self) -> list[dict[str, Any]]:
         """Una fila por documento, con sus dimensiones agregables.
 

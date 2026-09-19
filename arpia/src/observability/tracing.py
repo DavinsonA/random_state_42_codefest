@@ -15,7 +15,9 @@ from __future__ import annotations
 import contextvars
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
+from threading import Lock
 from typing import Any, Literal
 
 SpanType = Literal["llm", "tool", "retrieval"]
@@ -66,6 +68,14 @@ _current_parent: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 _trace_count = 0
 
+#: Trazas recientes, consultables por `GET /api/trace/{trace_id}`. Acotado
+#: (AGENTS.md §8): un proceso de 24 horas no puede guardar una traza por
+#: pregunta. Se conservan las ultimas, que es lo que sirve para diagnosticar una
+#: respuesta rara que acaba de ocurrir.
+MAX_TRAZAS = 50
+_recientes: OrderedDict[str, Trace] = OrderedDict()
+_recientes_lock = Lock()
+
 
 def start_trace() -> str:
     """Inicia una traza nueva. Llamar una vez al entrar a un endpoint HTTP."""
@@ -74,6 +84,10 @@ def start_trace() -> str:
     trace = Trace(trace_id=uuid.uuid4().hex)
     _current_trace.set(trace)
     _current_parent.set(None)
+    with _recientes_lock:
+        _recientes[trace.trace_id] = trace
+        while len(_recientes) > MAX_TRAZAS:
+            _recientes.popitem(last=False)
     return trace.trace_id
 
 
@@ -91,6 +105,31 @@ def to_spans() -> list[dict[str, Any]]:
     """Spans de la traza activa, en formato serializable."""
     trace = _current_trace.get()
     return trace.to_spans() if trace else []
+
+
+def get_trace(trace_id: str) -> list[dict[str, Any]] | None:
+    """Spans de una traza pasada. None si ya no esta en el buffer.
+
+    El arbol se reconstruye con `parent_id`: cada span sabe quien lo invoco, asi
+    que se puede ver que agente llamo a que herramienta y cuanto tardo cada
+    tramo. Es lo unico que permite explicar una respuesta rara despues de que
+    ocurrio.
+    """
+    with _recientes_lock:
+        trace = _recientes.get(trace_id)
+    return trace.to_spans() if trace else None
+
+
+def recent_trace_ids() -> list[str]:
+    """Ids de las trazas en memoria, de la mas reciente a la mas antigua."""
+    with _recientes_lock:
+        return list(reversed(_recientes.keys()))
+
+
+def reset() -> None:
+    """Vacia el buffer de trazas. Solo para pruebas."""
+    with _recientes_lock:
+        _recientes.clear()
 
 
 class span:  # noqa: N801 - nombre en minuscula deliberado, uso como `with tracing.span(...)`

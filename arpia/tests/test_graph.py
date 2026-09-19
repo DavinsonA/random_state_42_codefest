@@ -36,7 +36,11 @@ class FakeLLM:
     sobre si el grafo ve la pregunta de ESTE turno.
     """
 
-    def __init__(self, plan: Plan | None = None, texto: str = "respuesta redactada"):
+    def __init__(
+        self,
+        plan: Plan | None = None,
+        texto: str = "Segun el documento F1-DOC-0, la respuesta es esta.",
+    ):
         self.plan_fijo = plan
         self.texto = texto
         self.llamadas: list[str] = []
@@ -190,7 +194,7 @@ def test_un_turno_normal_cuesta_exactamente_dos_llamadas(entorno):
     out = g.invoke({"question": "que dice el corpus sobre satelites"}, _config())
     assert llm.planes == 1
     assert llm.redacciones == 1
-    assert out["answer"] == "respuesta redactada"
+    assert "F1-DOC-0" in out["answer"]
 
 
 def test_la_recuperacion_no_cuesta_llamadas(entorno):
@@ -288,7 +292,7 @@ def test_un_fallo_del_gateway_al_planificar_degrada_a_plan_de_respaldo(entorno):
     llm.fallar_plan = True
     out = g.invoke({"question": "capacidades antisatelite"}, _config())
     assert indice.consultas == ["capacidades antisatelite"]  # busco igual
-    assert out["answer"] == "respuesta redactada"
+    assert "F1-DOC-0" in out["answer"]
 
 
 def test_un_fallo_al_redactar_entrega_la_evidencia_cruda(entorno):

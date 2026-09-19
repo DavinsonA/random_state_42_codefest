@@ -114,7 +114,7 @@ def test_response_tiene_los_tres_bloques_de_adl_y_los_campos_propios():
     )
     body = resp.model_dump()
     assert body.keys() >= BLOQUES_ADL
-    assert body.keys() - BLOQUES_ADL == {"mode", "citations", "view_spec"}
+    assert body.keys() - BLOQUES_ADL == {"mode", "citations", "view_spec", "trace_id"}
     assert body["evaluacion"].keys() == {
         "input",
         "actual_output",
@@ -324,8 +324,10 @@ def test_usage_esquema_valido():
         "output_tokens",
         "trace_count",
         "cache",
+        "verificador",
     } == body.keys()
     assert "tasa_acierto" in body["cache"]
+    assert "tasa_activacion" in body["verificador"]
 
 
 # -- guardian y memoria vistos desde el endpoint -----------------------------

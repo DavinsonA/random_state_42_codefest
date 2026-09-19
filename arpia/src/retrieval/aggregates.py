@@ -89,8 +89,9 @@ def agregar(
 
     Returns:
         `{"filas": [{"clave", "valor", "doc_ids"}], "total", "cobertura"}`.
-        `cobertura` declara cuantos documentos del universo filtrado quedaron
-        fuera por no tener el dato de la dimension pedida.
+        `cobertura.sin_dato_en_la_dimension` declara cuantos documentos quedaron
+        fuera por no tener el dato de la dimension pedida, medido antes de
+        aplicar el rango temporal.
     """
     filas = tabla()
     universo = len(filas)
@@ -100,6 +101,14 @@ def agregar(
         filas = [f for f in filas if f.get("fenomeno") in permitidos]
     if organizacion:
         filas = [f for f in filas if f.get("organizacion") == organizacion]
+
+    # La cobertura se mide ANTES del filtro temporal, y el motivo es concreto:
+    # un rango de anos descarta en silencio los documentos sin ano, asi que
+    # medirla despues daria siempre "0 sin dato" — justo el mensaje tranquilizador
+    # y falso que este campo existe para evitar.
+    dimensionado = filas
+    sin_dato = sum(1 for f in dimensionado if not _valor(f, group_by))
+
     if desde is not None:
         filas = [f for f in filas if f.get("anio") and f["anio"] >= desde]
     if hasta is not None:
@@ -107,11 +116,9 @@ def agregar(
 
     conteos: dict[str, int] = defaultdict(int)
     docs: dict[str, list[str]] = defaultdict(list)
-    sin_dato = 0
     for fila in filas:
         clave = _valor(fila, group_by)
         if not clave:
-            sin_dato += 1
             continue
         conteos[clave] += 1 if metrica == "conteo_documentos" else fila["n_fragmentos"]
         if len(docs[clave]) < 10:  # muestra de respaldo, no la lista entera
@@ -127,7 +134,8 @@ def agregar(
         "total": sum(conteos.values()),
         "cobertura": {
             "documentos_universo": universo,
-            "documentos_filtrados": len(filas),
+            "documentos_en_dimension": len(dimensionado),
+            "documentos_contados": len(filas),
             "sin_dato_en_la_dimension": sin_dato,
         },
     }
