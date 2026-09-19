@@ -163,12 +163,20 @@ class Citation(BaseModel):
     `RETO.md` §Restricciones duras: todo dato mostrado debe rastrearse a su
     `doc_id` y su `chunk_id`. Este es el campo que el tablero usa para abrir la
     evidencia (`GET /api/evidence/{chunk_id}`).
+
+    Los campos opcionales de abajo alimentan el tooltip de una referencia
+    ("CSIS · 2019 · pdf · fragmento 12 de 87") sin otra peticion. Son opcionales
+    porque no toda cita los tiene (una cifra agregada, el modo stub).
     """
 
     doc_id: str
     chunk_id: str
     fuente: str | None = None
     fragmento: str = Field("", description="Texto citado, recortado.")
+    formato: str | None = Field(None, description="pdf, csv, json, xlsx, jpg, pbf, txt...")
+    posicion: int | None = Field(None, description="Posicion del fragmento en su documento (0).")
+    total_fragmentos: int | None = Field(None, description="Fragmentos del documento.")
+    anio: int | None = Field(None, description="Ano, solo si el documento lo declara.")
 
 
 class ViewSpec(BaseModel):

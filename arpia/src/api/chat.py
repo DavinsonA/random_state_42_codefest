@@ -180,7 +180,7 @@ def _retrieval_fallback(texto: str) -> str:
     procedencia son evidencia real, aunque no esten redactados.
     """
     try:
-        from src.tools.corpus import _get_index
+        from src.tools.corpus import _cita, _get_index
 
         hits = _get_index().search(texto, k=5)
     except Exception as exc:  # noqa: BLE001 - degradacion, nunca 500
@@ -188,17 +188,7 @@ def _retrieval_fallback(texto: str) -> str:
         return voz.SERVICIO_DEGRADADO
 
     turnlog.add_context([f"({h.citation()}) {h.text}" for h in hits])
-    turnlog.add_citations(
-        [
-            {
-                "doc_id": h.doc_id,
-                "chunk_id": h.chunk_id,
-                "fuente": h.metadata.get("organizacion") or h.metadata.get("fuente"),
-                "fragmento": h.text[:240],
-            }
-            for h in hits
-        ]
-    )
+    turnlog.add_citations([_cita(h.doc_id, h.chunk_id, h.metadata, h.text) for h in hits])
     if not hits:
         return voz.SIN_RESULTADOS
     cuerpo = "\n\n".join(f"[{i}] ({h.citation()}) {h.text[:500]}" for i, h in enumerate(hits, 1))

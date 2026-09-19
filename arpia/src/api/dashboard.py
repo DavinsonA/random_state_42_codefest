@@ -290,6 +290,97 @@ def evidence(chunk_id: str) -> JSONResponse:
             "formato": fila.get("formato", ""),
             "fenomeno": fila.get("fenomeno_id", ""),
             "fenomeno_nombre": fila.get("fenomeno_nombre", ""),
+            "posicion": fila.get("posicion"),
+            "total_fragmentos": fila.get("total_fragmentos"),
+        }
+    )
+
+
+#: Fragmentos a cada lado del citado que se pueden pedir de una vez. Sin tope,
+#: un solo GET podria devolver los 76.220 fragmentos de un CSV.
+MAX_VENTANA = 10
+
+#: Un fragmento llega a 18.000 tokens. En la vista del documento se recorta y se
+#: avisa (`truncado`); el texto completo sigue en `/api/evidence/{chunk_id}`.
+MAX_CHARS_FRAGMENTO = 4000
+
+
+@router.get("/document/{doc_id}")
+def document(
+    doc_id: str,
+    chunk_id: str | None = None,
+    posicion: int | None = None,
+    ventana: int = 2,
+) -> JSONResponse:
+    """El documento detras de una cita, reconstruido con sus fragmentos vecinos.
+
+    Es el "ver el documento" de una referencia. El corpus guarda texto ya
+    extraido, no el archivo original, asi que la vista es la misma para un PDF,
+    un CSV o una pagina web: los fragmentos contiguos, con el citado marcado.
+    Paginar es pedir de nuevo con otra `posicion`.
+
+    Args:
+        doc_id: documento (`F2-SWF-120`). Solo se usa como clave del indice,
+            nunca como ruta de archivo.
+        chunk_id: fragmento citado. Es el centro de la ventana y sale marcado
+            `citado`. Debe pertenecer a `doc_id`.
+        posicion: centro alternativo, cuando no hay fragmento citado. Por
+            defecto 0 (el inicio del documento).
+        ventana: fragmentos a cada lado del centro. Se recorta a 0..10.
+    """
+    ventana = max(0, min(ventana, MAX_VENTANA))
+    try:
+        from src.tools.corpus import _get_index
+
+        indice = _get_index()
+        total = indice.n_chunks(doc_id)
+        if total is None:
+            return _error("documento no encontrado", doc_id=doc_id)
+
+        centro, citado = 0, None
+        if chunk_id:
+            fila = indice.chunk(chunk_id)
+            if fila is None or fila.get("doc_id") != doc_id:
+                return _error("el fragmento no pertenece a ese documento", doc_id=doc_id)
+            centro, citado = int(fila.get("posicion", 0)), chunk_id
+        elif posicion is not None:
+            centro = max(0, min(posicion, total - 1))
+
+        filas = indice.chunks_of(doc_id, centro - ventana, centro + ventana) or []
+    except Exception as exc:  # noqa: BLE001
+        log.warning("documento no accesible: %s", exc)
+        return _error(f"indice no disponible: {type(exc).__name__}", doc_id=doc_id)
+
+    if not filas:
+        return _error("documento sin fragmentos", doc_id=doc_id)
+
+    cabecera = filas[0]
+    primero, ultimo = int(filas[0]["posicion"]), int(filas[-1]["posicion"])
+    return JSONResponse(
+        content={
+            "disponible": True,
+            "doc_id": doc_id,
+            "formato": cabecera.get("formato", ""),
+            "fuente": cabecera.get("fuente", ""),
+            "organizacion": cabecera.get("organizacion", ""),
+            "anio": cabecera.get("anio"),
+            "fenomeno": cabecera.get("fenomeno_id", ""),
+            "fenomeno_nombre": cabecera.get("fenomeno_nombre", ""),
+            "total_fragmentos": total,
+            "desde": primero,
+            "hasta": ultimo,
+            "hay_anterior": primero > 0,
+            "hay_siguiente": ultimo < total - 1,
+            "fragmentos": [
+                {
+                    "chunk_id": f["chunk_id"],
+                    "posicion": f["posicion"],
+                    "texto": str(f.get("texto", ""))[:MAX_CHARS_FRAGMENTO],
+                    "truncado": len(str(f.get("texto", ""))) > MAX_CHARS_FRAGMENTO,
+                    "citado": f["chunk_id"] == citado,
+                }
+                for f in filas
+            ],
         }
     )
 

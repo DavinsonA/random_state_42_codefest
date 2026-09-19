@@ -28,7 +28,7 @@
 | Enrutamiento por `Host` (un contenedor, 3 dominios) | ✅ hecho | `src/api/routing.py` |
 | Traducción del modelo de la card al id de LiteLLM (`gateway_model_for`) | ✅ hecho (§6) | `src/agents/card.py` |
 | **Nada se ha probado aún con el modelo real** | ❌ | — |
-| Endpoints del tablero: `/api/components`, `/api/aggregate`, `/api/timeline`, `/api/evidence/{chunk_id}`, `/api/trace/{trace_id}` | ✅ hechos | `src/api/dashboard.py` |
+| Endpoints del tablero: `/api/components`, `/api/aggregate`, `/api/timeline`, `/api/evidence/{chunk_id}`, `/api/document/{doc_id}`, `/api/trace/{trace_id}` | ✅ hechos | `src/api/dashboard.py` |
 | `GET /api/geo` | ⚠️ existe pero responde siempre "no disponible": el corpus no tiene lugar (§14) | `dashboard.py` |
 | `GET /api/graph` (lo cita `FRONTEND.md`) | ❌ no existe | — |
 | `GET /topics` | ➖ **retirado**: se eliminó el contrato sin ruta ni consumidor (`adea37f`) | — |
@@ -60,6 +60,7 @@ existe**: hay endpoints de datos (`/api/*`) pero no `dashboard.html`, así que e
 | `GET /api/timeline` | Serie anual de documentos, con su cobertura | Tablero |
 | `GET /api/geo` | **Siempre `disponible: false`**: el corpus no tiene lugar | Tablero |
 | `GET /api/evidence/{chunk_id}` | El fragmento exacto detrás de una cita | Tablero, chat |
+| `GET /api/document/{doc_id}` | El documento detrás de una cita, reconstruido con sus fragmentos vecinos (ver §14, "Referencias") | Chat, tablero |
 | `GET /api/trace/{trace_id}` | Árbol de ejecución de un turno reciente. **Cerrado por defecto**: solo responde con `ARPIA_DEBUG_TRACE` (expone preguntas, fragmentos y salidas del modelo) | Nosotros (depurar) |
 | `POST /api/view` | Resuelve un `ViewSpec` a los datos que el tablero debe pintar, validándolo contra el mismo esquema cerrado del visualizador | Tablero |
 
@@ -174,7 +175,8 @@ prohíbe que haya más).
   },
 
   "mode": "live",                        // "live" | "stub"
-  "citations": [ { "doc_id": "…", "chunk_id": "…", "fuente": "…", "fragmento": "…" } ],
+  "citations": [ { "doc_id": "…", "chunk_id": "…", "fuente": "…", "fragmento": "…",
+                   "formato": "pdf", "posicion": 12, "total_fragmentos": 87, "anio": 2019 } ],
   "view_spec": null,                     // ViewSpec (§4) solo si el turno pide una vista
   "trace_id": "…"                        // correlaciona con GET /api/trace/{trace_id}
 }
@@ -478,7 +480,13 @@ acumuladores mutables del turno. Como varios hilos escriben en ellos a la vez,
   primera llamada.
 - **`aggregates.py`:** conteos y frecuencias sobre la tabla de 1.826 documentos, sin SQL;
   cada resultado trae los `doc_id` que lo sustentan y la cobertura del dato.
-- **`index.chunk(chunk_id)`** devuelve un fragmento por su id (lo usa `GET /api/evidence`).
+- **`index.chunk(chunk_id)`** devuelve un fragmento por su id (lo usa `GET /api/evidence`). Es de **acceso
+  directo**: el JSONL agrupa cada documento en un bloque contiguo y ordenado (comprobado sobre las 326.866
+  filas: sin documentos partidos, `chunk_id = <doc>__chunk_<orden>`, `posicion` = orden), así que el fragmento
+  `n` está en la fila `primera + n`. Si el id no cumple esa forma, recorre el bloque como antes. Importa porque
+  un documento (un CSV) llega a **76.220 fragmentos**.
+- **`index.chunks_of(doc_id, desde, hasta)`** y **`index.n_chunks(doc_id)`** (lo usa `GET /api/document`). Toda fila
+  que sale del índice lleva `total_fragmentos`.
 - **El tablero depende del índice.** `aggregates.tabla()` se construye desde `_get_index().document_table()`. Si el
   índice no está, **ya no se cachea una tabla vacía** (`adea37f`): los endpoints responden `disponible: false` y
   reintentan en la siguiente petición.
@@ -580,6 +588,7 @@ uv run pytest tests -q                                      # 319 casos
 | `test_voz.py` | la voz del sistema vive en un solo módulo; ningún prompt define su propio tono | 15 |
 | `test_trazabilidad_analitico.py` | cada cifra cita sus documentos; `citations` y `retrieval_context` llenos; el verificador no reescribe un conteo trazable; el conteo no se cae si el índice falla | 12 |
 | `test_theme.py` | ningún color hexadecimal fuera de `src/theme/` | 6 |
+| `test_referencias.py` | citas con `formato`/`posicion`/`total_fragmentos`; lectura por posición sobre un `VectorIndex` real pequeño; `/api/document` (ventana, bordes, tope, fragmento ajeno, doc desconocido, recorte); ids hostiles o truncados no abren otro fragmento | 28 |
 
 > Las pruebas de `test_graph.py` cuentan llamadas con **contadores del LLM falso**; no leen
 > `turnlog` ni `usage`. Por eso no detectaban el fallo de §12 #2; `test_paralelo.py` y
@@ -637,7 +646,7 @@ orquestador, el caché y la memoria con su evidencia, su propuesta de arreglo y 
 | 17 | ✅ **HECHO en `adea37f`.** La tabla del corpus no se cachea vacía | Antes, si el volumen del índice no estaba al llegar la primera petición, el tablero quedaba en blanco hasta reiniciar | Los endpoints responden `disponible: false` |
 | 18 | **`FRONTEND.md` contradice al backend en 7 puntos** (§14): `fenomeno=` vs `fenomenos=`, citas con `quote`/`score`, `chart: "map"`, `lugar`, `group_by: "mes"`, fechas completas, `/api/graph` | Quien construya el tablero con esa guía escribirá código que el backend rechaza o ignora | Corregir `FRONTEND.md` con la tabla de §14 |
 | 19 | ✅ `/api/trace` **cerrado en `86e8244`** (solo con `ARPIA_DEBUG_TRACE`). El resto de `/api/*` sigue siendo público y de solo lectura, en los tres dominios | Lo público ya no expone preguntas ni salidas del modelo | Confirmar que `ARPIA_DEBUG_TRACE` queda vacío en Coolify |
-| 20 | **El chat no usa `/api/evidence`**: `api.js` no tiene esa función, así que hacer clic en una cita no abre el fragmento | `FRONTEND.md` lo llama "requisito obligatorio de la especificación" | Añadir `obtenerEvidencia(chunk_id)` a `api.js` y enlazarlo en `chat.js` |
+| 20 | **El chat no usa `/api/evidence`**: `api.js` no tiene esa función, así que hacer clic en una cita no abre el fragmento. Ahora también falta el tooltip y el visor que sugirió ADL | `FRONTEND.md` lo llama "requisito obligatorio de la especificación" | El backend ya está (`/api/evidence`, `/api/document`, citas enriquecidas): contrato en §14, "Referencias". Falta `obtenerEvidencia` y `obtenerDocumento` en `api.js` y el tooltip y panel en `chat.js` |
 | 21 | ✅ **Resuelto con el presupuesto de tiempo (#6).** Timeout del front (90 s) vs peor caso del backend | — | — |
 | 22 | ✅ **Resuelto.** El orquestador fallaba con el modelo real: `gpt-oss-120b` devolvía la clave `Pasos` (el `title` del esquema) y `Plan` (`extra="forbid"`) la rechazaba, con lo que el respaldo mandaba todo al documental. Medido antes: 1 de 6 llamadas válidas; después: 6 de 6, y las tres preguntas típicas responden por `/chat` con el agente correcto | — | `plan.py`: `Plan` y `Paso` normalizan las claves (`Pasos` → `pasos`, `Group By` → `group_by`) y siguen rechazando campos inexistentes. `plan_de_respaldo` manda el conteo inequívoco al analítico (y suma el visualizador si piden una gráfica). `executors._dimension` ya no depende de las tildes. No se añadió reintento: la causa raíz está cerrada y cada reintento costaría tokens |
 | 23 | ✅ **Resuelto.** El caché guardaba como buena la respuesta del plan de respaldo (`estado: ok`) y repetir la pregunta la devolvía con `cache:1.00` hasta reiniciar | — | `planificar` anota `turnlog.marcar_no_cacheable("plan_de_respaldo")` en sus dos salidas al respaldo y `run_chat` no guarda en el caché un turno marcado (queda en el log). El `estado` sigue siendo `ok`. Cualquier agente puede usar la misma marca para otros degradados |
@@ -745,12 +754,50 @@ Todos devuelven **HTTP 200**. Un fallo o un dato inexistente llega como
 | `GET /api/aggregate` | `metrica`, `group_by`, `fenomenos` (`F1,F2`), `organizacion`, `desde`, `hasta` (años enteros), `limite` (1–100, def. 25) | `filas[{clave, valor, doc_ids}]`, `total`, `cobertura{documentos_universo, documentos_en_dimension, documentos_contados, sin_dato_en_la_dimension}` |
 | `GET /api/timeline` | `fenomenos`, `desde`, `hasta` | serie anual ordenada, `granularidad: "anio"`, `cobertura` y un `aviso` con el 34% |
 | `GET /api/geo` | — | **siempre `disponible: false`**: la metadata no tiene lugar, país ni coordenadas |
-| `GET /api/evidence/{chunk_id}` | — | `chunk_id`, `doc_id`, `texto`, `fuente`, `organizacion`, `anio`, `formato`, `fenomeno`, `fenomeno_nombre` |
+| `GET /api/evidence/{chunk_id}` | — | `chunk_id`, `doc_id`, `texto`, `fuente`, `organizacion`, `anio`, `formato`, `fenomeno`, `fenomeno_nombre`, `posicion`, `total_fragmentos` |
+| `GET /api/document/{doc_id}` | `chunk_id` (centro y fragmento marcado `citado`), `posicion` (centro alternativo, def. 0), `ventana` (fragmentos a cada lado, 0–10, def. 2) | cabecera (`formato`, `fuente`, `organizacion`, `anio`, `fenomeno`, `total_fragmentos`), `desde`, `hasta`, `hay_anterior`, `hay_siguiente` y `fragmentos[{chunk_id, posicion, texto, truncado, citado}]` |
 | `GET /api/trace/{trace_id}` | — | `spans` del turno (últimas 50 trazas). **Solo con `ARPIA_DEBUG_TRACE`**; si no, `disponible: false` |
 | `POST /api/view` | cuerpo: un `ViewSpec` | los datos ya resueltos: `filas`, `total`, `cobertura`, `aviso`, `nota`. Valida con el mismo esquema cerrado que el visualizador; una vista temporal agrupa por año |
 
 Cada cifra viene con los `doc_id` que la sustentan, y `/api/evidence` abre el fragmento
 exacto: es la trazabilidad que exige `RETO.md`.
+
+### Referencias: ver de dónde sale cada afirmación (backend hecho, frontend pendiente)
+
+ADL sugirió que, al pasar el ratón por una referencia, se vea de dónde sale, y que con un clic se
+abra el documento o el fragmento. **El backend está listo; falta el frontend** (`src/ui/static/`, de
+quien lo mantiene). Tres niveles, de menor a mayor costo:
+
+| Gesto | Qué mostrar | Fuente de datos | Peticiones |
+|---|---|---|---|
+| **Pasar el ratón** | tooltip: `fuente · anio · formato · fragmento posicion+1 de total_fragmentos` y el texto de `fragmento` | el propio `citations[i]` de la respuesta de `/chat` | **0** |
+| **Clic** | panel con el fragmento completo | `GET /api/evidence/{chunk_id}` | 1 |
+| **"Ver el documento"** dentro del panel | los fragmentos vecinos con el citado resaltado; "anterior" / "siguiente" piden otra `posicion` | `GET /api/document/{doc_id}?chunk_id=…&ventana=2` | 1 por página |
+
+**Por qué fragmentos y no el archivo original.** El corpus guarda **texto ya extraído**, no el archivo:
+`fuente` es una ruta relativa y cada documento tiene un solo archivo. Por formato (índice de la Etapa 1):
+
+| Formato | Documentos | Fragmentos | Abrir el original |
+|---|---|---|---|
+| pdf | 759 | 141.200 | serviría, pero la metadata no trae página |
+| csv / xlsx | 30 | 173.675 | no: las filas (fragmentos) dicen más que descargar el archivo |
+| json (páginas web) | 954 | 6.778 | no: ya es texto |
+| pbf (mosaicos de mapa) | 73 | 5.191 | no: no hay nada legible |
+| jpg / avif / txt | 10 | 22 | solo la imagen; aporta poco |
+
+Como la vista del documento se arma con fragmentos, es **la misma para todos los formatos**, cuesta 0
+tokens y no exige subir los originales al servidor. Abrir el archivo original (solo PDF e imágenes)
+quedó **fuera a propósito**: pediría un endpoint que sirva archivos, que debería resolver por `doc_id` y
+nunca aceptar una ruta.
+
+**Lo que el frontend debe cuidar**
+- **Pintar el texto como texto, nunca como HTML** (`textContent`, no `innerHTML`). El corpus viene de
+  fuentes externas y puede traer texto malicioso; es parte del puntaje de seguridad.
+- Un fragmento llega a 18.000 tokens: `/api/document` recorta cada uno a 4.000 caracteres y marca
+  `truncado: true`; el texto completo está en `/api/evidence/{chunk_id}`.
+- Los campos nuevos de `citations[]` (`formato`, `posicion`, `total_fragmentos`, `anio`) son
+  **opcionales**: una cifra agregada o el modo stub pueden no traerlos. Ocultar la parte que falte.
+- Todos los endpoints responden 200; un fallo llega como `disponible: false` con `motivo`.
 
 **Mapeo `ViewSpec → endpoint` (propuesta, aún no implementada en el frontend).** Los
 parámetros de `/api/aggregate` reflejan los campos del `ViewSpec`:
