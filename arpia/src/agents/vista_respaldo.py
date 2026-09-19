@@ -162,6 +162,99 @@ def limite_de_pregunta(pregunta: str) -> int | None:
     return None
 
 
+_INGLES = re.compile(
+    r"\b(the|by|of|top|and|per|count|counts|distribution|over|time|breakdown|share|documents|"
+    r"organizations|phenomenon|phenomena|formats?|year|years|trend|evolution|overview)\b"
+)
+_ESPANOL = re.compile(
+    r"\b(el|la|los|las|de|del|por|que|en|con|cuantos|cuantas|documentos|organizaciones|"
+    r"muestrame|dame|grafica|para|segun|entre|sobre)\b"
+)
+
+
+def _parece_ingles(texto: str) -> bool:
+    plano = _plano(texto)
+    return len(_INGLES.findall(plano)) >= 1 and len(_INGLES.findall(plano)) > len(
+        _ESPANOL.findall(plano)
+    )
+
+
+def titulo_por_defecto(
+    chart: str,
+    metrica: str,
+    group_by: str | None,
+    fenomenos: list[str],
+    serie_por: str | None = None,
+) -> str:
+    """El titulo determinista de una vista, en espanol."""
+    unidad = "Fragmentos" if metrica == "conteo_fragmentos" else "Documentos"
+    if chart == "kpi":
+        titulo = f"{unidad} en total"
+    else:
+        titulo = f"{unidad} por {NOMBRE_DIMENSION.get(group_by or 'fenomeno', group_by)}"
+        if serie_por:
+            titulo += f" y {NOMBRE_DIMENSION.get(serie_por, serie_por)}"
+    return f"{titulo} · {fenomenos[0]}" if fenomenos else titulo
+
+
+def en_espanol(vista: ViewSpec, pregunta: str) -> ViewSpec:
+    """Si el visualizador titulo o anoto en ingles una pregunta en espanol, se corrige.
+
+    Medido con el modelo real: "Top 3 organizations by document count" para una pregunta en
+    espanol. El titulo lo lee el analista: el idioma lo pone quien pregunta, no el modelo. La
+    nota en ingles se descarta (el aviso de cobertura lo impone el codigo, en espanol).
+    """
+    if _parece_ingles(pregunta) or not _ESPANOL.search(_plano(pregunta)):
+        return vista
+    if vista.titulo and _parece_ingles(vista.titulo):
+        vista.titulo = titulo_por_defecto(
+            vista.chart, vista.metrica, vista.group_by, vista.fenomenos, vista.serie_por
+        )
+    if vista.nota and _parece_ingles(vista.nota):
+        vista.nota = ""
+    return vista
+
+
+def reconciliar(vista: ViewSpec, llamadas: list[dict[str, Any]]) -> ViewSpec:
+    """La vista adopta la dimension y el fenomeno que el analista conto, si el visualizador no los supo.
+
+    Medido con el modelo real: el orquestador le paso al visualizador "Mostrar los resultados en
+    un grafico de barras", sin decir por que dimension, mientras el analista contaba por
+    organizacion de F2. Sin dato, el visualizador cae a su valor por defecto (por fenomeno,
+    los tres) y el tablero mostraba otra cosa que el texto. El analista si tiene la dimension
+    (viene del plan); es el mismo turno y la misma pregunta.
+
+    Solo actua sobre ese valor por defecto (fenomeno, los tres): una vista que el visualizador
+    eligio con informacion (otra dimension, un solo fenomeno) no se toca. Nunca sobre una serie
+    temporal ni una cifra.
+    """
+    conteo = _parametros_del_conteo(llamadas)
+    if conteo is None or vista.chart in ("timeline", "kpi"):
+        return vista
+    cambia: dict[str, Any] = {}
+    dimension = str(conteo.get("group_by") or "")
+    if vista.group_by in (None, "fenomeno") and dimension in ("organizacion", "fuente", "formato"):
+        cambia["group_by"] = dimension
+    fenomeno = str(conteo.get("fenomenos") or "")
+    destino = cambia.get("group_by", vista.group_by)
+    if (
+        fenomeno in ("F1", "F2", "F3")
+        and len(vista.fenomenos) != 1
+        and destino not in (None, "fenomeno")
+    ):
+        cambia["fenomenos"] = [fenomeno]
+    if not cambia:
+        return vista
+    try:
+        nueva = ViewSpec.model_validate({**vista.model_dump(), **cambia})
+    except ValidationError:
+        return vista
+    nueva.titulo = titulo_por_defecto(
+        nueva.chart, nueva.metrica, nueva.group_by, nueva.fenomenos, nueva.serie_por
+    )
+    return nueva
+
+
 def fenomeno_de_pregunta(pregunta: str) -> list[str]:
     """`["F3"]` si la pregunta nombra un unico fenomeno; `[]` si ninguno o varios."""
     p = _plano(pregunta)
@@ -223,14 +316,7 @@ def desde_turno(
         limite = int(conteo["limite"])
     elif chart not in ("kpi", "timeline"):
         limite = limite_de_pregunta(pregunta)
-    unidad = "Fragmentos" if metrica == "conteo_fragmentos" else "Documentos"
-    titulo = (
-        f"{unidad} en total"
-        if chart == "kpi"
-        else f"{unidad} por {NOMBRE_DIMENSION.get(group_by, group_by)}"
-    )
-    if fenomenos:
-        titulo += f" · {fenomenos[0]}"
+    titulo = titulo_por_defecto(chart, metrica, group_by, fenomenos)
 
     try:
         return ViewSpec(

@@ -30,6 +30,7 @@ import {
 } from "./viewspec.js";
 import { conIdioma, mensajeError, montarSelector, t } from "./i18n.js";
 import { capturarGraficas, descargarInforme } from "./informe.js";
+import { filaDePaso, seguirProgreso } from "./progreso.js";
 import { abrirVisor, enlazarReferencias } from "./referencias.js";
 import { conTransicion, paginaLista, suavizarEnlace } from "./transiciones.js";
 
@@ -335,6 +336,15 @@ function agrupar(filas, clave) {
     return [...m.values()];
 }
 
+/** Parte una etiqueta larga en lineas de hasta `ancho` letras (Chart.js dibuja cada elemento en su linea). */
+const envolver = (texto, ancho = 18) =>
+    String(texto).split(" ").reduce((lineas, palabra) => {
+        const ultima = lineas[lineas.length - 1];
+        if (ultima !== undefined && `${ultima} ${palabra}`.length <= ancho) lineas[lineas.length - 1] = `${ultima} ${palabra}`;
+        else lineas.push(palabra);
+        return lineas;
+    }, []);
+
 const legible = (g) => String(g ?? "").replace(/_/g, " ") || t("tablero.sinDato");
 
 /** Elige y prepara el renderizador para el tipo de grafico que pidio el agente. */
@@ -417,8 +427,10 @@ function dibujanteDe(spec, filas, total) {
                 });
             }
             // Por otra dimension: una serie por fenomeno; apiladas si lo pidio el agente.
+            // Por fenomeno van en su orden (F1, F2, F3); en las demas, de mayor a menor.
+            const porFen = spec.group_by === "fenomeno";
             const categorias = agrupar(filas, (f) => f.grupo)
-                .sort((a, b) => b.valor - a.valor)
+                .sort((a, b) => (porFen ? a.k.localeCompare(b.k) : b.valor - a.valor))
                 .slice(0, MAX_CATEGORIAS)
                 .map((g) => g.k);
             const series = fens.map((fen) => {
@@ -432,11 +444,12 @@ function dibujanteDe(spec, filas, total) {
             });
             return (c) => dibujarBarras(c, {
                 etiqueta,
-                labels: categorias.map(legible),
+                labels: categorias.map((k) => (porFen ? envolver(etiquetaFenomeno(k)) : legible(k))),
                 series,
                 apilado: spec.chart === "stacked_bar",
-                // etiquetas largas (organizaciones, fuentes) se leen mejor en horizontal
-                horizontal: spec.group_by !== "anio",
+                // etiquetas largas (organizaciones, fuentes) se leen mejor en horizontal; las de los
+                // tres fenomenos, en columnas con el nombre partido en lineas
+                horizontal: spec.group_by !== "anio" && !porFen,
             });
         }
     }
@@ -451,7 +464,10 @@ async function vistaDelAgente(spec, { inicial = false } = {}) {
         return { titulo, origen: "sin_datos", nota: `${NOMBRE_CHART[spec.chart]}. ${error}`, dibujar: mensaje(t("tablero.sinDatosTodavia")) };
     }
 
-    const notas = [spec.nota, datos.nota];
+    // El aviso generico ("solo el 34 % declara ano") lo reemplaza la cobertura MEDIDA de esta vista:
+    // decir las dos cosas seguidas confunde (34 % del corpus y 10 % de F1 a la vez).
+    const generico = datos.cobertura?.total && /^Cobertura temporal/i.test(spec.nota || "");
+    const notas = [generico ? "" : spec.nota, datos.nota];
     if (datos.cobertura?.total) {
         const { con_dato, total } = datos.cobertura;
         notas.push(t("nota.cobertura", { con: fmt.format(con_dato), total: fmt.format(total), pct: Math.round((con_dato / total) * 100) }));
@@ -659,7 +675,7 @@ function sesionId() {
     }
 }
 
-function mostrarRespuesta(datos) {
+function mostrarRespuesta(datos, { pasos = [] } = {}) {
     const caja = $("respuesta");
     caja.replaceChildren();
     for (const parrafo of String(datos.respuesta || t("chat.vacia")).split(/\n\s*\n/)) {
@@ -670,6 +686,18 @@ function mostrarRespuesta(datos) {
     for (const a of md.agentes_invocados || []) meta.append(el("span", "chip-agente", t(`agente.${a}`)));
     meta.append(el("span", "mono", `${fmt.format(md.tokens?.total || 0)} tokens · ${fmt.format(md.latencia_ms || 0)} ms`));
     caja.append(meta);
+
+    // Las interacciones de los agentes en este turno (las mismas que se vieron en vivo): quedan
+    // a mano, plegadas, como traza de como se llego a la respuesta.
+    if (pasos.length) {
+        const detalle = el("details", "interacciones");
+        const total = pasos.reduce((s, p) => s + p.duracion_ms, 0);
+        detalle.append(el("summary", null, t("tablero.interacciones", { n: pasos.length, ms: fmt.format(Math.round(total)) })));
+        const lista = el("ul", "progreso-pasos");
+        for (const p of pasos) lista.append(filaDePaso(p.nombre, p.duracion_ms));
+        detalle.append(lista);
+        caja.append(detalle);
+    }
 
     // Hallazgos del compositor: lo que las cifras de la vista dicen, calculado
     // sin modelo. Van debajo de la respuesta y antes de la procedencia porque
@@ -728,10 +756,13 @@ async function preguntar(texto) {
     $("enviar").disabled = true;
     $("pensando").classList.add("activo");
     $("respuesta").replaceChildren(el("p", null, t("tablero.ia.procesando")));
+    // Cronometro y pasos de los agentes en vivo, como en el modulo de chat.
+    const seguimiento = seguirProgreso($("respuesta"), sesionId());
 
     try {
         const datos = await enviarChat(limpio, sesionId());
-        mostrarRespuesta(datos);
+        const pasos = await seguimiento.finalizar();
+        mostrarRespuesta(datos, { pasos });
         mostrarCitas(datos.citations);
         marcarModo(datos.mode);
         await aplicarVistas(vistasDeRespuesta(datos));
@@ -739,6 +770,7 @@ async function preguntar(texto) {
         console.error(err);
         $("respuesta").replaceChildren(el("p", null, mensajeError(err)));
     } finally {
+        seguimiento.detener();
         estado.ocupado = false;
         $("enviar").disabled = false;
         $("pensando").classList.remove("activo");

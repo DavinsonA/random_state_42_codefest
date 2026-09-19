@@ -182,6 +182,27 @@ def _leer_view_spec(crudo: Any) -> ViewSpec | None:
         return None
 
 
+def _ajustar_vista(vista: ViewSpec | None, texto: str) -> ViewSpec | None:
+    """Ultimos ajustes deterministas a la vista del visualizador. Nunca lanza.
+
+    1. Adopta la dimension y el fenomeno que conto el analista (el visualizador puede no
+       haberlos recibido: ver `vista_respaldo.reconciliar`).
+    2. Titulo y nota en el idioma de la pregunta ORIGINAL del usuario: el orquestador reformula
+       a veces en ingles, y con esa instruccion el modelo titula en ingles.
+    3. El tope de la pregunta ("las 5 organizaciones").
+    """
+    if vista is None:
+        return None
+    try:
+        from src.agents import vista_respaldo
+
+        vista = vista_respaldo.reconciliar(vista, turnlog.tool_calls())
+        vista = vista_respaldo.en_espanol(vista, texto)
+    except Exception as exc:  # noqa: BLE001 - frontera: un ajuste nunca tumba el turno
+        log.warning("no se pudo ajustar la vista (%s); se usa como llego", exc)
+    return _con_tope(vista, texto)
+
+
 def _con_tope(vista: ViewSpec | None, texto: str) -> ViewSpec | None:
     """Aplica el tope que pide la pregunta ("las 5 organizaciones") a la vista del visualizador.
 
@@ -368,7 +389,7 @@ def _turno(texto: str, session_id: str) -> AgentResponse:
 
     if view_spec is None and not s.is_stub:
         view_spec = _vista_de_respaldo(texto, estado)
-    view_spec = _con_tope(view_spec, texto)
+    view_spec = _ajustar_vista(view_spec, texto)
 
     vistas, hallazgos = _componer_tablero(view_spec)
     construida = _build(

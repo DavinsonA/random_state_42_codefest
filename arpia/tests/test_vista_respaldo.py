@@ -254,3 +254,88 @@ def test_el_tope_llega_a_la_vista_pero_no_a_un_kpi_ni_a_una_serie_temporal():
         "evolucion de los 5 primeros anos", ["agente_visualizador"], [_conteo(group_by="anio")]
     )
     assert serie.limite is None
+
+
+# -- el idioma lo pone quien pregunta, no el modelo -----------------------------------------------
+
+
+def _vista(**k):
+    from src.api.contracts import ViewSpec
+
+    return ViewSpec(**{"chart": "bar", "group_by": "organizacion", **k})
+
+
+def test_un_titulo_en_ingles_para_una_pregunta_en_espanol_se_corrige():
+    v = vr.en_espanol(
+        _vista(titulo="Top 3 organizations by document count", fenomenos=["F2"]),
+        "Las 3 organizaciones que mas publican sobre seguridad espacial en barras",
+    )
+    assert v.titulo == "Documentos por organización · F2"
+
+
+def test_un_titulo_en_espanol_se_respeta():
+    titulo = "Documentos sobre seguridad del entorno espacial por organización"
+    assert (
+        vr.en_espanol(_vista(titulo=titulo), "Grafica por organizacion los documentos").titulo
+        == titulo
+    )
+
+
+def test_una_pregunta_en_ingles_conserva_el_titulo_en_ingles():
+    v = vr.en_espanol(
+        _vista(titulo="Top 3 organizations by document count"),
+        "Show the top 3 organizations by documents",
+    )
+    assert v.titulo == "Top 3 organizations by document count"
+
+
+def test_una_nota_en_ingles_se_descarta_para_que_el_codigo_ponga_el_aviso_en_espanol():
+    v = vr.en_espanol(
+        _vista(nota="Only 34% of the documents declare the year"),
+        "Dame la evolucion de los documentos por organizacion",
+    )
+    assert v.nota == ""
+
+
+def test_el_titulo_de_un_cruce_nombra_las_dos_dimensiones():
+    assert (
+        vr.titulo_por_defecto("stacked_bar", "conteo_documentos", "fenomeno", [], "formato")
+        == "Documentos por fenómeno y formato"
+    )
+
+
+# -- la vista adopta lo que el analista conto -----------------------------------------------------
+
+
+def test_sin_dimension_en_la_instruccion_la_vista_adopta_la_que_conto_el_analista():
+    """El caso real: el visualizador recibio "muestra un grafico de barras" y cayo a fenomeno."""
+    vista = _vista(
+        group_by="fenomeno",
+        fenomenos=["F1", "F2", "F3"],
+        titulo="Conteo de documentos por fenómeno",
+    )
+    v = vr.reconciliar(vista, [_conteo(group_by="organizacion", fenomenos="F2")])
+    assert (v.group_by, v.fenomenos) == ("organizacion", ["F2"])
+    assert v.titulo == "Documentos por organización · F2", "el titulo viejo diria otra cosa"
+
+
+def test_una_vista_elegida_con_informacion_no_se_toca():
+    vista = _vista(group_by="formato", fenomenos=["F3"])
+    assert vr.reconciliar(vista, [_conteo(group_by="organizacion", fenomenos="F2")]) is vista
+
+
+def test_una_serie_temporal_y_una_cifra_no_se_reconcilian():
+    for chart in ("timeline", "kpi"):
+        vista = _vista(chart=chart, group_by=None)
+        assert vr.reconciliar(vista, [_conteo(group_by="organizacion")]) is vista
+
+
+def test_sin_conteo_no_hay_con_que_reconciliar():
+    vista = _vista(group_by="fenomeno")
+    assert vr.reconciliar(vista, []) is vista
+
+
+def test_si_el_analista_conto_por_fenomeno_no_se_filtra_a_un_solo_fenomeno():
+    """Una barra de una sola categoria no dice nada."""
+    vista = _vista(group_by="fenomeno", fenomenos=[])
+    assert vr.reconciliar(vista, [_conteo(group_by="fenomeno", fenomenos="F2")]) is vista

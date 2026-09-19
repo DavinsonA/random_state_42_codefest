@@ -382,7 +382,10 @@
    que no crezca con el propio canvas */
 .pagina-tablero .lienzo {
     position: relative;
-    height: 250px;
+    /* `flex` fijo y `min-height` explicito: el minimo automatico seria el alto del canvas y el
+       grafico no podria encogerse */
+    flex: 0 0 250px;
+    min-height: 250px;
     /* el canvas nunca se sale de su caja ni tapa lo que va debajo (botones) */
     overflow: hidden;
 }
@@ -530,6 +533,11 @@
 .pagina-tablero .grafico.alto .tabla-caja {
     height: 520px;
     max-height: none;
+}
+
+.pagina-tablero .grafico.alto .lienzo {
+    flex-basis: 520px;
+    min-height: 520px;
 }
 
 .grafico-cuerpo {
@@ -870,4 +878,34 @@
 
 @media (prefers-reduced-motion: reduce) {
     .pagina-tablero .grafico.entrando { animation: none; }
+}
+
+
+/* -- interacciones de los agentes, plegadas bajo la respuesta -- */
+.pagina-tablero .interacciones {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--arpia-text-secondary);
+}
+
+.pagina-tablero .interacciones summary {
+    cursor: pointer;
+    color: var(--arpia-text-muted);
+}
+
+.pagina-tablero .interacciones summary:hover,
+.pagina-tablero .interacciones[open] summary {
+    color: var(--arpia-text);
+}
+
+.pagina-tablero .interacciones .progreso-pasos {
+    margin-top: 6px;
+}
+
+/* -- graficos por defecto: mas altos que antes, sin llenar toda la columna --
+ * Con exactamente dos paneles (la vista inicial) el lienzo pasa de 250 a 340 px. Con mas
+ * paneles se queda en 250 para que la cuadricula 2x2 siga cabiendo junto al asistente. */
+.pagina-tablero .graficos:has(> .grafico:nth-child(2):last-child) .grafico:not(.alto) .lienzo {
+    flex: 0 0 340px;
+    min-height: 340px;
 }

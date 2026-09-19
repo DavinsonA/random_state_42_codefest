@@ -38,6 +38,7 @@ const DICC = {
         "agente.agente_analitico": "Analítico",
         "agente.guardian": "Guardián",
         "agente.memoria": "Memoria",
+        "agente.agente_compositor": "Compositor",
 
         "fenomeno.F1": "IA y Capacidades Estratégicas",
         "fenomeno.F2": "Seguridad del Entorno Espacial",
@@ -62,6 +63,8 @@ const DICC = {
 
         "titulo.total": "Total de {metrica}",
         "titulo.por": "{Metrica} por {grupo}",
+        "titulo.cruce": "{Metrica} por {grupo} y {serie}",
+        "tablero.interacciones": "Interacciones de los agentes · {n} pasos · {ms} ms",
 
         "error.sin_backend": "Esta página no está conectada al backend de A.R.P.I.A. (se abrió desde otro servidor, p. ej. Live Server). Con el backend encendido, ábrela en http://localhost:8765/ (chat) o http://dashboard.localhost:8765/ (tablero).",
         "error.timeout": "El servicio tardó demasiado en responder. Intenta de nuevo.",
@@ -200,6 +203,7 @@ const DICC = {
         "agente.agente_analitico": "Analytics agent",
         "agente.guardian": "Guardian",
         "agente.memoria": "Memory",
+        "agente.agente_compositor": "Composer agent",
 
         "fenomeno.F1": "AI and Strategic Capabilities",
         "fenomeno.F2": "Space Environment Security",
@@ -224,6 +228,8 @@ const DICC = {
 
         "titulo.total": "Total {metrica}",
         "titulo.por": "{Metrica} by {grupo}",
+        "titulo.cruce": "{Metrica} by {grupo} and {serie}",
+        "tablero.interacciones": "Agent interactions · {n} steps · {ms} ms",
 
         "error.sin_backend": "This page is not connected to the A.R.P.I.A. backend (it was opened from another server, e.g. Live Server). With the backend running, open it at http://localhost:8765/ (chat) or http://dashboard.localhost:8765/ (dashboard).",
         "error.timeout": "The service took too long to respond. Please try again.",

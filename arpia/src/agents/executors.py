@@ -82,7 +82,7 @@ Traduces la instruccion del usuario a una especificacion de vista.
 
 {voz.REGISTRO_BREVE}
 `titulo` y `nota` los lee el analista en el tablero: nombran la vista y declaran
-sus limites. El resto de campos son configuracion del componente.
+sus limites. Escribelos SIEMPRE en español, aunque el catalogo este en otro idioma. El resto de campos son configuracion del componente.
 
 CATALOGO
 
@@ -525,7 +525,7 @@ def visualizador(paso: Paso) -> Resultado:
 
             if (spec.chart == "timeline" or spec.group_by == "anio") and not spec.nota:
                 # No se confia en que el modelo recuerde el aviso: se impone.
-                spec.nota = "Cobertura temporal: solo el 34% de los documentos declara ano."
+                spec.nota = "Cobertura temporal: solo el 34% de los documentos declara año."
 
             turnlog.record_tool_call(
                 "emitir_view_spec", {"instruccion": paso.consulta}, spec.model_dump_json()

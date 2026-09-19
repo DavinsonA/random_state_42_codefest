@@ -29,12 +29,13 @@ const NOMBRE_METRICA = traducible("metrica", ["conteo_documentos", "conteo_fragm
 
 /** Vista con la que abre el tablero si no llega ninguna. */
 export const VISTA_INICIAL = {
-    chart: "bar",
+    chart: "stacked_bar",
     metrica: "conteo_documentos",
     fenomenos: [],
     desde: null,
     hasta: null,
     group_by: "fenomeno",
+    serie_por: "formato",  // de que tipo es el material de cada fenomeno
     titulo: "",  // vacio: el titulo por defecto sale traducido (tituloPorDefecto)
     nota: "",
 };
@@ -50,7 +51,7 @@ export function normalizar(vs) {
     // Una dona reparte un todo entre categorias: vale por cualquier dimension menos el ano
     // (una dona de anios no dice nada; para eso esta la linea de tiempo).
     if (vs.chart === "donut" && (!groupBy || groupBy === "anio")) groupBy = "fenomeno";
-    if (vs.chart === "stacked_bar" && (!groupBy || groupBy === "fenomeno")) groupBy = "organizacion";
+    if (vs.chart === "stacked_bar" && !groupBy) groupBy = "organizacion";
     if ((vs.chart === "bar" || vs.chart === "table") && !groupBy) groupBy = "fenomeno";
     // Segunda dimension (una serie por cada valor). El servidor la valida igual; aqui solo se
     // descarta lo que no se puede pintar: distinta del eje y en un grafico que separe series.
@@ -113,7 +114,9 @@ export function vistasDesdeHash() {
 export function tituloPorDefecto(spec) {
     const metrica = NOMBRE_METRICA[spec.metrica] || spec.metrica;
     if (spec.chart === "kpi") return t("titulo.total", { metrica });
-    return t("titulo.por", { metrica, grupo: NOMBRE_GROUP_BY[spec.group_by] || t("grupo.generico") });
+    const grupo = NOMBRE_GROUP_BY[spec.group_by] || t("grupo.generico");
+    if (spec.serie_por) return t("titulo.cruce", { metrica, grupo, serie: NOMBRE_GROUP_BY[spec.serie_por] || spec.serie_por });
+    return t("titulo.por", { metrica, grupo });
 }
 
 // -- datos -------------------------------------------------------------------
