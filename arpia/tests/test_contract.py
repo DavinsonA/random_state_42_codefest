@@ -313,6 +313,11 @@ def test_health_en_stub_nunca_reporta_ok():
     assert body["agent_card_loaded"] is True
     assert "orquestador" in body["agentes_registrados"]
     assert any("stub" in w for w in body["warnings"])
+    # El peor caso de llamadas por turno sale de los topes reales del grafo.
+    # `MAX_AGENT_ITERATIONS` quedo muerto al reemplazar el bucle ReAct y /health
+    # lo seguia reportando, que es peor que no reportar nada.
+    assert body["max_llamadas_por_turno"] >= 2
+    assert body["debug_trace"] is False
 
 
 def test_usage_esquema_valido():

@@ -23,7 +23,6 @@ class Settings:
     llm_base_url: str
     llm_api_key: str
     llm_model: str
-    max_agent_iterations: int
     request_timeout_s: int
     log_level: str
     arpia_mode: str
@@ -48,7 +47,6 @@ def get_settings() -> Settings:
         llm_base_url=os.getenv("LLM_BASE_URL", ""),
         llm_api_key=os.getenv("LLM_API_KEY", ""),
         llm_model=os.getenv("LLM_MODEL", ""),
-        max_agent_iterations=int(os.getenv("MAX_AGENT_ITERATIONS", "6")),
         request_timeout_s=int(os.getenv("REQUEST_TIMEOUT_S", "60")),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         arpia_mode=mode,

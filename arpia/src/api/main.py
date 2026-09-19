@@ -60,6 +60,20 @@ app = FastAPI(title="A.R.P.I.A.", version="0.1.0", lifespan=lifespan)
 # -- helpers de estado ------------------------------------------------------
 
 
+def _max_llamadas_por_turno() -> int:
+    """Peor caso de llamadas al modelo en un turno, desde los topes reales.
+
+    `MAX_AGENT_ITERATIONS` quedo muerto al reemplazar el bucle ReAct por el
+    orquestador de plan unico: nadie lo aplicaba y `/health` lo seguia
+    reportando, que es peor que no reportar nada. Los topes de verdad son el
+    numero de replanificaciones y los agentes que gastan por turno.
+    """
+    from src.agents.plan import MAX_REPLANES
+
+    planes = 1 + MAX_REPLANES
+    return planes + 1 + 1 + 1  # planes + redaccion + view_spec + verificador
+
+
 def _check_index() -> tuple[bool, str | None]:
     """Indice cargado y alineado con su metadata. Nunca lanza.
 
@@ -188,7 +202,7 @@ def health(response: Response) -> HealthResponse:
         status=status,  # type: ignore[arg-type]
         version=app.version,
         mode=s.arpia_mode,  # type: ignore[arg-type]
-        max_iterations=s.max_agent_iterations,
+        max_llamadas_por_turno=_max_llamadas_por_turno(),
         index_loaded=index_loaded,
         gateway_reachable=gateway_reachable,
         agent_card_loaded=card_loaded,

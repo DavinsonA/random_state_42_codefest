@@ -260,7 +260,14 @@ class HealthResponse(BaseModel):
     status: Literal["ok", "degraded", "down"]
     version: str
     mode: Mode
-    max_iterations: int
+    max_llamadas_por_turno: int = Field(
+        0,
+        description=(
+            "Peor caso de llamadas al modelo en un turno, calculado desde los topes "
+            "reales del grafo. Acotado por construccion: el Bloque B se normaliza "
+            "contra los otros equipos."
+        ),
+    )
     index_loaded: bool
     gateway_reachable: bool
     agent_card_loaded: bool
