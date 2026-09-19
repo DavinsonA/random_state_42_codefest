@@ -3,7 +3,7 @@
 // El ViewSpec es un esquema cerrado: aqui solo se acepta el mismo vocabulario.
 // Lo que no se reconozca se descarta, nunca se interpreta.
 
-import { ApiError, obtenerAgregado } from "./api.js";
+import { ApiError, obtenerAgregado, obtenerVista } from "./api.js";
 import { mensajeError, t } from "./i18n.js";
 
 /** Objeto cuyos valores se leen del idioma activo en cada acceso (getters). */
@@ -19,6 +19,7 @@ export const CHARTS = ["timeline", "bar", "stacked_bar", "donut", "table", "kpi"
 export const GROUP_BY = ["fenomeno", "organizacion", "fuente", "formato", "anio"];
 export const METRICAS = ["conteo_documentos", "conteo_fragmentos"];
 const FENS = ["F1", "F2", "F3"];
+const CHARTS_CON_SERIES = ["bar", "stacked_bar", "timeline"];
 
 export const NOMBRE_CHART = traducible("chart", ["timeline", "bar", "stacked_bar", "donut", "table", "kpi"]);
 
@@ -51,6 +52,10 @@ export function normalizar(vs) {
     if (vs.chart === "donut" && (!groupBy || groupBy === "anio")) groupBy = "fenomeno";
     if (vs.chart === "stacked_bar" && (!groupBy || groupBy === "fenomeno")) groupBy = "organizacion";
     if ((vs.chart === "bar" || vs.chart === "table") && !groupBy) groupBy = "fenomeno";
+    // Segunda dimension (una serie por cada valor). El servidor la valida igual; aqui solo se
+    // descarta lo que no se puede pintar: distinta del eje y en un grafico que separe series.
+    const eje = vs.chart === "timeline" ? "anio" : groupBy;
+    const serie = GROUP_BY.includes(vs.serie_por) && vs.serie_por !== eje && CHARTS_CON_SERIES.includes(vs.chart) ? vs.serie_por : null;
     return {
         chart: vs.chart,
         metrica: METRICAS.includes(vs.metrica) ? vs.metrica : "conteo_documentos",
@@ -58,6 +63,7 @@ export function normalizar(vs) {
         desde: anio(vs.desde),
         hasta: anio(vs.hasta),
         group_by: vs.chart === "kpi" ? null : groupBy,
+        serie_por: serie,
         titulo: typeof vs.titulo === "string" ? vs.titulo : "",
         nota: typeof vs.nota === "string" ? vs.nota : "",
     };
@@ -184,6 +190,39 @@ function unirCobertura(respuestas, dimension) {
 }
 
 /**
+ * Vista con dos dimensiones (`serie_por`): la cruza el servidor, que devuelve categorias x series.
+ * Cada fila lleva su `serie`; `fenomeno` solo cuando la serie ES un fenomeno.
+ */
+async function cargarCruce(spec, { modoStub }) {
+    try {
+        const r = await obtenerVista(spec);
+        if (r.disponible === false) {
+            if (modoStub) return { datos: datosSimulados({ ...spec, serie_por: null }) };
+            return { error: mensajeIndice(r.motivo) };
+        }
+        const filas = (r.series || []).flatMap((s) =>
+            (r.categorias || []).map((c, i) => ({
+                grupo: String(c),
+                serie: String(s.clave),
+                fenomeno: r.serie_por === "fenomeno" && FENS.includes(s.clave) ? s.clave : null,
+                valor: Number(s.valores?.[i]) || 0,
+                doc_ids: Array.isArray(s.doc_ids?.[i]) ? s.doc_ids[i].map(String) : [],
+            })),
+        ).filter((f) => f.valor > 0);
+        return {
+            // El aviso del servidor ya incluye la nota de la vista: no se dice dos veces.
+            datos: { filas, total: Number(r.total) || 0, cobertura: null, nota: (r.aviso || "").replace(spec.nota || " ", "").trim(), simulado: false },
+        };
+    } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+            if (modoStub) return { datos: datosSimulados({ ...spec, serie_por: null }) };
+            return { error: t("error.sin_datos_tablero") };
+        }
+        return { error: err instanceof ApiError ? mensajeError(err) : t("error.datos") };
+    }
+}
+
+/**
  * Carga los datos de una vista.
  * Devuelve { datos } o { error } con un mensaje legible; nunca lanza.
  *
@@ -192,6 +231,7 @@ function unirCobertura(respuestas, dimension) {
  * fenomeno, se pide una vez por fenomeno y cada fila lo hereda de su peticion.
  */
 export async function cargar(spec, { modoStub = false } = {}) {
+    if (spec.serie_por) return cargarCruce(spec, { modoStub });
     try {
         const dimension = spec.group_by || "fenomeno";
         const fenomenos = spec.fenomenos.length ? spec.fenomenos : FENS;

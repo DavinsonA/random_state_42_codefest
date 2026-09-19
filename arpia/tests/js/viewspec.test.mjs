@@ -158,3 +158,79 @@ test("la dona por organizacion pide el conteo por organizacion, una vez por feno
     assert.ok(pedidos.every((u) => u.includes("group_by=organizacion")), pedidos.join(" | "));
     assert.deepEqual(datos.filas.map((f) => [f.grupo, f.fenomeno]), [["SIPRI", "F3"]]);
 });
+
+// serie_por: una segunda dimension. `normalizar` la descartaba, asi que "evolucion anual por
+// organizacion" se pintaba como series por fenomeno con el titulo de organizacion.
+test("normalizar conserva serie_por solo donde se puede pintar", () => {
+    assert.equal(normalizar({ chart: "stacked_bar", group_by: "organizacion", serie_por: "formato" }).serie_por, "formato");
+    assert.equal(normalizar({ chart: "timeline", serie_por: "organizacion" }).serie_por, "organizacion");
+    assert.equal(normalizar({ chart: "bar", group_by: "organizacion", serie_por: "organizacion" }).serie_por, null, "igual al eje");
+    assert.equal(normalizar({ chart: "timeline", serie_por: "anio" }).serie_por, null, "el eje ya es el anio");
+    assert.equal(normalizar({ chart: "donut", group_by: "organizacion", serie_por: "formato" }).serie_por, null);
+    assert.equal(normalizar({ chart: "bar", group_by: "organizacion", serie_por: "lugar" }).serie_por, null);
+    assert.equal(normalizar({ chart: "bar", group_by: "organizacion" }).serie_por, null);
+});
+
+test("una vista con serie_por se pide a /api/view y sus series llegan cruzadas", async () => {
+    const pedidos = [];
+    globalThis.fetch = async (url, opciones) => {
+        pedidos.push([String(url), opciones?.method, opciones?.body]);
+        return {
+            ok: true,
+            status: 200,
+            headers: { get: () => "application/json" },
+            json: async () => ({
+                disponible: true,
+                serie_por: "formato",
+                categorias: ["SIPRI", "RESDAL"],
+                series: [
+                    { clave: "pdf", valores: [4, 0], doc_ids: [["a"], []] },
+                    { clave: "csv", valores: [1, 3], doc_ids: [["b"], ["c"]] },
+                ],
+                total: 8,
+                aviso: "",
+            }),
+        };
+    };
+    const spec = normalizar({ chart: "stacked_bar", group_by: "organizacion", serie_por: "formato", fenomenos: ["F3"] });
+    const { datos } = await cargar(spec);
+    assert.equal(pedidos.length, 1, "una sola llamada, no una por fenomeno");
+    assert.deepEqual(pedidos[0].slice(0, 2), ["/api/view", "POST"]);
+    assert.equal(JSON.parse(pedidos[0][2]).serie_por, "formato");
+    assert.deepEqual(
+        datos.filas.map((f) => [f.grupo, f.serie, f.valor, f.fenomeno]),
+        [["SIPRI", "pdf", 4, null], ["SIPRI", "csv", 1, null], ["RESDAL", "csv", 3, null]],
+        "las celdas en cero no se dibujan",
+    );
+    assert.equal(datos.total, 8);
+});
+
+test("si /api/view no esta disponible, el cruce lo dice en vez de inventar datos", async () => {
+    globalThis.fetch = async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: async () => ({ disponible: false, motivo: "el corpus aun no esta cargado en este despliegue" }),
+    });
+    const r = await cargar(normalizar({ chart: "timeline", serie_por: "organizacion" }));
+    assert.ok(r.error && !r.datos);
+});
+
+test("el aviso del servidor no repite la nota que la vista ya trae", async () => {
+    globalThis.fetch = async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: async () => ({
+            disponible: true,
+            serie_por: "organizacion",
+            categorias: ["2024"],
+            series: [{ clave: "SIPRI", valores: [2], doc_ids: [["a"]] }],
+            total: 2,
+            aviso: "174 de 479 documentos no declaran ano. Cobertura temporal: solo el 34% declara ano.",
+        }),
+    });
+    const spec = normalizar({ chart: "timeline", serie_por: "organizacion", nota: "Cobertura temporal: solo el 34% declara ano." });
+    const { datos } = await cargar(spec);
+    assert.equal(datos.nota, "174 de 479 documentos no declaran ano.");
+});

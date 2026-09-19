@@ -152,3 +152,8 @@ export function obtenerAgregado({ metrica, group_by, fenomenos, desde, hasta }) 
     if (hasta) q.set("hasta", hasta);
     return pedir(`/api/aggregate?${q.toString()}`);
 }
+
+/** POST /api/view — la vista lista para pintar (categorias x series, ya cruzadas en el servidor). */
+export function obtenerVista(spec) {
+    return pedir("/api/view", { method: "POST", body: spec, timeoutMs: 20000 });
+}
