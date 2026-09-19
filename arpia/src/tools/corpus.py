@@ -33,7 +33,9 @@ def _get_index() -> VectorIndex:
     return _index
 
 
-def recuperar(query: str, k: int = 8, fenomeno: str | None = None) -> list[Hit]:
+def recuperar(
+    query: str, k: int = 8, fenomeno: str | None = None, *, registrar_tool: bool = True
+) -> list[Hit]:
     """Recupera fragmentos y DEJA CONSTANCIA en el registro del turno.
 
     Punto unico de recuperacion del sistema. Todo lo que busque en el corpus
@@ -48,6 +50,9 @@ def recuperar(query: str, k: int = 8, fenomeno: str | None = None) -> list[Hit]:
         query: consulta en lenguaje natural, usada literal.
         k: fragmentos a devolver despues de filtrar.
         fenomeno: "F1" | "F2" | "F3" para sesgar el resultado, o None.
+        registrar_tool: anota la busqueda en `tools_called`. La tool registrada
+            `buscar_corpus` pasa False porque el registry ya la anota, y dos
+            entradas por una sola busqueda falsearian la trayectoria.
 
     Returns:
         Lista de `Hit` ordenada por similitud descendente.
@@ -63,6 +68,16 @@ def recuperar(query: str, k: int = 8, fenomeno: str | None = None) -> list[Hit]:
         # haria desaparecer sin que el usuario se entere.
         hits = filtrados or hits
     hits = hits[:k]
+
+    # ADL evalua la trayectoria a partir de `tools_called`. Una recuperacion que
+    # no deja rastro ahi se lee como una respuesta salida de la nada.
+    if registrar_tool:
+        turnlog.record_tool_call(
+            "buscar_corpus",
+            {"query": query, "k": k, "fenomeno": fenomeno or ""},
+            f"{len(hits)} fragmentos recuperados"
+            + (f" (mejor score {hits[0].score:.3f})" if hits else ""),
+        )
 
     # Lo que ADL llama `retrieval_context`: el texto que se le entrego al modelo,
     # con su procedencia para que las citas tengan respaldo.
@@ -110,7 +125,7 @@ def buscar_corpus(query: str, k: int = 8, fenomeno: str = "") -> str:
         documento para poder citarlo. Si no hay resultados, lo indica
         explicitamente en vez de devolver texto vacio.
     """
-    hits = recuperar(query, k=k, fenomeno=fenomeno or None)
+    hits = recuperar(query, k=k, fenomeno=fenomeno or None, registrar_tool=False)
     if not hits:
         return f"Sin resultados para la consulta: {query!r}"
     return "\n\n".join(

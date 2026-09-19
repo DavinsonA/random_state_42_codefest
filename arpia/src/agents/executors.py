@@ -68,6 +68,10 @@ El corpus NO tiene lugar, ni actor, ni fecha exacta: no hay mapas y la unica
 granularidad temporal es el ano. El ano solo se conoce en el 34% de los
 documentos, asi que TODA vista temporal debe traer ese aviso en `nota`.
 
+`desde` y `hasta` SOLO si el usuario pide un periodo de forma explicita. No los
+rellenes "por completitud": filtrar por anos descarta todos los documentos que
+no declaran fecha —dos tercios del corpus— y la vista sale creible y falsa.
+
 Elige el componente que responda la pregunta con menos adornos: `bar` para
 comparar categorias, `stacked_bar` para comparar composicion, `donut` solo para
 proporciones de pocas categorias, `timeline` para evolucion anual, `kpi` para
@@ -110,6 +114,9 @@ def ejecutar(paso: Paso) -> Resultado:
         return Resultado(agente=paso.agente, error=f"agente '{paso.agente}' no disponible")
     with tracing.span("tool", f"ejecutar.{paso.agente}", input=paso.consulta[:300]) as sp:
         try:
+            # Se anota ANTES de correr: un agente que fallo tambien intervino, y
+            # ocultarlo haria ilegible la trayectoria que evalua ADL.
+            turnlog.record_agent(paso.agente)
             resultado = fn(paso)
             sp.set_output(f"suficiente={resultado.suficiente} evidencia={len(resultado.evidencia)}")
             return resultado
@@ -253,7 +260,11 @@ def analitico(paso: Paso) -> Resultado:
     """
     from src.retrieval import aggregates
 
-    group_by = _dimension(paso.consulta)
+    # El plan manda. La heuristica es solo el respaldo para cuando el
+    # orquestador no rellena el campo: depende de como haya reformulado la
+    # consulta, y una reformulacion que pierde la palabra clave hace que el
+    # agente conteste por una dimension distinta de la preguntada.
+    group_by = paso.group_by or _dimension(paso.consulta)
     metrica = "conteo_fragmentos" if "fragmento" in paso.consulta.lower() else "conteo_documentos"
     resultado = aggregates.agregar(
         metrica=metrica,  # type: ignore[arg-type]

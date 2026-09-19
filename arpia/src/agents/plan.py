@@ -16,7 +16,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.contracts import Fenomeno
+from src.api.contracts import Fenomeno, GroupBy
 
 #: Agentes que el orquestador puede invocar. Coinciden con los ids de
 #: `agent_card.json`: lo que no esta en la card no se puede planificar.
@@ -43,6 +43,13 @@ class Paso(BaseModel):
     )
     fenomeno: Fenomeno | None = Field(
         None, description="Filtro por fenomeno si la pregunta lo acota. None = los tres."
+    )
+    group_by: GroupBy | None = Field(
+        None,
+        description=(
+            "Solo para `agente_analitico`: por que dimension agrupar el conteo. "
+            "Una de: fenomeno, organizacion, fuente, formato, anio."
+        ),
     )
 
 

@@ -28,7 +28,7 @@ from typing import Any
 from src.agents.card import gateway_model_for, model_for
 from src.agents.plan import MAX_PASOS, Plan, plan_de_respaldo
 from src.config import get_logger, get_settings
-from src.observability import tracing, usage
+from src.observability import tracing, turnlog, usage
 
 log = get_logger(__name__)
 
@@ -46,7 +46,10 @@ Agentes disponibles:
 - `agente_analitico`: responde preguntas cuantitativas sobre la metadata
   agregada (cuantos documentos, distribuciones, comparaciones de volumen entre
   fenomenos). Usalo cuando la pregunta sea de conteo o de distribucion, no de
-  contenido.
+  contenido. **Para este agente rellena SIEMPRE `group_by`** con la dimension
+  que pide la pregunta: fenomeno, organizacion, fuente, formato o anio. Si lo
+  dejas vacio, el agente tiene que adivinarla a partir de tu texto y puede
+  contestar por una dimension distinta de la preguntada.
 - `agente_visualizador`: decide que componente del tablero mostrar. Usalo cuando
   el usuario pida ver, graficar, comparar visualmente o filtrar el tablero.
 
@@ -121,6 +124,7 @@ def planificar(
         el esquema, un plan de respaldo determinista.
     """
     with tracing.span("llm", "orquestador.planificar", input=pregunta[:500]) as sp:
+        turnlog.record_agent(AGENTE)
         try:
             cliente = modelo if modelo is not None else _llm()
             estructurado = cliente.with_structured_output(Plan, include_raw=True)

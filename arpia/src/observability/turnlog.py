@@ -23,6 +23,11 @@ _lock = threading.Lock()
 class TurnLog:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     retrieval_context: list[str] = field(default_factory=list)
+    #: Agentes que intervinieron en el turno, en orden de primera aparicion.
+    #: Separado del consumo de tokens a proposito: el agente analitico gasta
+    #: CERO por diseno, y derivar la lista del desglose de tokens lo dejaba
+    #: invisible en `agentes_invocados` pese a haber trabajado.
+    agentes: list[str] = field(default_factory=list)
     #: Procedencia estructurada de cada fragmento: `RETO.md` exige poder
     #: rastrear todo dato mostrado hasta su `doc_id` y su `chunk_id`.
     #: `retrieval_context` es el texto que vio el modelo; esto es de donde salio.
@@ -57,6 +62,18 @@ def add_context(chunks: list[str]) -> None:
     log = _current.get()
     if log is not None:
         log.retrieval_context.extend(chunks)
+
+
+def record_agent(agente: str) -> None:
+    """Anota que un agente intervino, gaste tokens o no."""
+    log = _current.get()
+    if log is not None and agente and agente not in log.agentes:
+        log.agentes.append(agente)
+
+
+def agentes() -> list[str]:
+    log = _current.get()
+    return list(log.agentes) if log else []
 
 
 def add_citations(rows: list[dict[str, Any]]) -> None:

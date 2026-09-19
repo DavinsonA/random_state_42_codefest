@@ -120,8 +120,13 @@ def _build(
     """
     totals = usage.request_usage()
     breakdown = usage.request_breakdown()
+
+    # Los que gastaron tokens, mas los que actuaron sin gastarlos. Derivar esta
+    # lista solo del desglose de tokens dejaba invisible al agente analitico,
+    # que por diseno cuesta cero: un agente que trabaja y no aparece es credito
+    # perdido, y es justo el que da puntos extra.
     agentes = [b["agente"] for b in breakdown]
-    for extra in agentes_extra:
+    for extra in (*turnlog.agentes(), *agentes_extra):
         if extra not in agentes:
             agentes.append(extra)
 
