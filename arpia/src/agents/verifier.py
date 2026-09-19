@@ -10,7 +10,9 @@ Las seis preguntas de AGENTS.md §8:
    las respuestas sanas**. Una verificacion que salta siempre duplica el coste
    del turno y el Bloque B se normaliza contra los otros equipos.
 5. **Autoridad.** Puede reescribir la respuesta o degradarla. No busca, no
-   planifica, no toca el corpus.
+   planifica, no toca el corpus. Esta declarado en `agent_card.json`: ADL cruza
+   los ids de `agentes_invocados` y `tokens_por_agente` contra la ficha, y un id
+   que no aparece en ella es una inconsistencia detectable.
 6. **Que NO debe saber.** La pregunta original mas alla de lo necesario, ni el
    plan, ni el historial. Compara un texto contra unos fragmentos. Ese
    aislamiento es lo que lo hace un verificador y no un segundo redactor.
@@ -196,7 +198,7 @@ def verificar(respuesta: str, evidencia: list[dict[str, Any]], modelo: Any = Non
                 )
                 for e in evidencia[:8]
             )
-            cliente = modelo if modelo is not None else _llm("agente_documental")
+            cliente = modelo if modelo is not None else _llm(AGENTE)
             salida = cliente.invoke(
                 [
                     {"role": "system", "content": VERIFICACION_PROMPT},
@@ -212,7 +214,7 @@ def verificar(respuesta: str, evidencia: list[dict[str, Any]], modelo: Any = Non
             usage.record_usage(
                 getattr(salida, "usage_metadata", None),
                 agent=AGENTE,
-                model=model_for("agente_documental"),
+                model=model_for(AGENTE),
             )
             corregida = str(getattr(salida, "content", "")).strip()
             sp.set_output(corregida[:2000])

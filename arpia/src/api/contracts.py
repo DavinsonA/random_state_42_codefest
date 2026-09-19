@@ -230,23 +230,6 @@ ChatResponse = AgentResponse
 TokenCount = Tokens
 
 
-# -- GET /topics (uso interno del frontend; no lo evalua ADL) ---------------
-
-
-class Topic(BaseModel):
-    id: str
-    nombre: str
-    descripcion: str
-    num_documentos: int | None = Field(
-        None, description="Conteo real sobre la metadata; None si no se calculo."
-    )
-    preguntas_ejemplo: list[str] = Field(default_factory=list)
-
-
-class TopicsResponse(BaseModel):
-    topics: list[Topic]
-
-
 # -- operacion -------------------------------------------------------------
 
 

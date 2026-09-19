@@ -24,6 +24,7 @@ class Settings:
     llm_api_key: str
     llm_model: str
     request_timeout_s: int
+    turn_budget_s: int
     log_level: str
     arpia_mode: str
     session_ttl_s: int
@@ -47,7 +48,10 @@ def get_settings() -> Settings:
         llm_base_url=os.getenv("LLM_BASE_URL", ""),
         llm_api_key=os.getenv("LLM_API_KEY", ""),
         llm_model=os.getenv("LLM_MODEL", ""),
-        request_timeout_s=int(os.getenv("REQUEST_TIMEOUT_S", "60")),
+        # 25 s por llamada, no 60: el peor caso son tres llamadas y el
+        # frontend abandona a los 90 s. Medido, la mas lenta tarda ~7 s.
+        request_timeout_s=int(os.getenv("REQUEST_TIMEOUT_S", "25")),
+        turn_budget_s=int(os.getenv("TURN_BUDGET_S", "75")),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         arpia_mode=mode,
         session_ttl_s=int(os.getenv("SESSION_TTL_S", "3600")),

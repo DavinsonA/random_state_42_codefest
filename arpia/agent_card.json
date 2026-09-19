@@ -127,6 +127,19 @@
           }
         }
       ]
+    },
+    {
+      "id": "verificador",
+      "nombre": "Verificador de evidencia",
+      "descripcion": "AGENTE ADICIONAL (puntos extra). Contrasta la respuesta redactada contra la evidencia que la sustenta antes de devolverla. La deteccion es determinista y no consume tokens: compara los identificadores de documento citados contra los recuperados en el turno. Solo cuando detecta una cita sin respaldo, o una respuesta extensa que no se apoya en ninguna fuente, gasta una llamada para corregirla; si no puede, degrada a una declaracion explicita de falta de evidencia en vez de devolver una afirmacion infundada.",
+      "modelo": "llama-3.3-70b-instruct",
+      "proveedor": "meta",
+      "activado_por": "condicion de la respuesta, no por el orquestador",
+      "ejemplos_de_activacion": [
+        "La respuesta cita un documento que no se recupero en este turno",
+        "La respuesta afirma varios parrafos sin apoyarse en ninguna fuente"
+      ],
+      "tools": []
     }
   ]
 }

@@ -8,7 +8,8 @@ Las seis preguntas de AGENTS.md §8:
 3. **Salida.** Una respuesta previa reutilizable, o nada.
 4. **Criterio de exito.** Cero falsos aciertos. Devolver la respuesta de OTRA
    pregunta es peor que no tener cache: cuesta calidad, que pesa el doble que
-   eficiencia. De ahi un umbral de 0,95, no de 0,85.
+   eficiencia. De ahi un umbral de 0,95, no de 0,85, y de ahi que las preguntas
+   de seguimiento solo acierten dentro de su propia conversacion.
 5. **Autoridad.** Lee y escribe su propio almacen en memoria del proceso. No
    llama a modelos ni toca el corpus.
 6. **Que NO debe saber.** Nada del contenido de las respuestas que guarda: para
@@ -17,6 +18,13 @@ Las seis preguntas de AGENTS.md §8:
 **Cero tokens.** El embedding se calcula con el encoder local en la CPU del
 contenedor (`src/retrieval/encoder.py`), no en el gateway. Un acierto de cache
 ahorra la totalidad de las llamadas de un turno.
+
+**Alcance por conversacion.** Un primer turno puede acertar contra cualquier
+entrada: es una pregunta que se entiende sola, y el evaluador manda preguntas
+independientes. Un turno de seguimiento —"y en 2023?", "y el otro fenomeno?"—
+solo puede acertar contra su propia sesion: su texto es identico al de otra
+conversacion y significa algo distinto. Sin esta regla, el cache devolveria con
+total confianza la respuesta de otra pregunta.
 
 **Degradacion:** si el encoder local no esta cargado, el cache no se apaga:
 cae a coincidencia exacta sobre el texto normalizado. Menos aciertos, misma
@@ -70,6 +78,7 @@ class Entrada:
     normalizada: str
     respuesta: AgentResponse
     vector: Any = None
+    sesion: str = ""
 
 
 class CacheSemantico:
@@ -79,17 +88,27 @@ class CacheSemantico:
         self.umbral = umbral
         self.max_entradas = max_entradas
         self._entradas: OrderedDict[str, Entrada] = OrderedDict()
+        #: Turnos vistos por sesion. Distingue una pregunta que se entiende sola
+        #: de un seguimiento que depende del hilo. Acotado como el cache.
+        self._turnos: OrderedDict[str, int] = OrderedDict()
         self._lock = threading.Lock()
         self.aciertos = 0
         self.consultas = 0
 
     # -- consulta --------------------------------------------------------
 
-    def buscar(self, consulta: str) -> AgentResponse | None:
+    def es_continuacion(self, sesion: str) -> bool:
+        """True si esta sesion ya tuvo turnos: la consulta puede depender de ellos."""
+        with self._lock:
+            return self._turnos.get(sesion, 0) > 0
+
+    def buscar(self, consulta: str, sesion: str = "") -> AgentResponse | None:
         """Respuesta previa para una consulta equivalente, o None.
 
         Args:
             consulta: texto ya saneado por el guardian.
+            sesion: hilo de la conversacion. En un turno de seguimiento el
+                acierto se restringe a esta misma sesion.
 
         Returns:
             Copia de la respuesta guardada, con la metadata reescrita para
@@ -98,9 +117,12 @@ class CacheSemantico:
         with tracing.span("tool", "memoria.buscar", input=consulta[:200]) as sp:
             self.consultas += 1
             norma = normalizar(consulta)
+            solo_esta_sesion = self.es_continuacion(sesion)
 
             with self._lock:
                 exacta = self._entradas.get(norma)
+                if exacta is not None and solo_esta_sesion and exacta.sesion != sesion:
+                    exacta = None
                 if exacta is not None:
                     self._entradas.move_to_end(norma)
             if exacta is not None:
@@ -108,7 +130,7 @@ class CacheSemantico:
                 sp.set_output("acierto exacto")
                 return self._como_acierto(exacta.respuesta, 1.0)
 
-            pareja = self._mas_parecida(consulta)
+            pareja = self._mas_parecida(consulta, sesion if solo_esta_sesion else None)
             if pareja is None:
                 sp.set_output("fallo")
                 return None
@@ -123,12 +145,21 @@ class CacheSemantico:
             sp.set_output(f"acierto semantico {similitud:.3f}")
             return self._como_acierto(entrada.respuesta, similitud)
 
-    def _mas_parecida(self, consulta: str) -> tuple[Entrada, float] | None:
-        """Entrada mas parecida y su similitud coseno. None si no se puede."""
+    def _mas_parecida(
+        self, consulta: str, sesion: str | None = None
+    ) -> tuple[Entrada, float] | None:
+        """Entrada mas parecida y su similitud coseno. None si no se puede.
+
+        Con `sesion`, solo compara contra entradas de esa conversacion.
+        """
         if not encoder.loaded():
             return None
         with self._lock:
-            candidatas = [e for e in self._entradas.values() if e.vector is not None]
+            candidatas = [
+                e
+                for e in self._entradas.values()
+                if e.vector is not None and (sesion is None or e.sesion == sesion)
+            ]
         if not candidatas:
             return None
         try:
@@ -167,7 +198,7 @@ class CacheSemantico:
 
     # -- escritura -------------------------------------------------------
 
-    def guardar(self, consulta: str, respuesta: AgentResponse) -> None:
+    def guardar(self, consulta: str, respuesta: AgentResponse, sesion: str = "") -> None:
         """Registra una respuesta. Nunca lanza: un fallo aqui no puede costar
         la consulta que ya se respondio bien."""
         try:
@@ -177,13 +208,18 @@ class CacheSemantico:
             if encoder.loaded():
                 vector = encoder.encode([consulta])[0]
             entrada = Entrada(
-                consulta, normalizar(consulta), respuesta.model_copy(deep=True), vector
+                consulta, normalizar(consulta), respuesta.model_copy(deep=True), vector, sesion
             )
             with self._lock:
                 self._entradas[entrada.normalizada] = entrada
                 self._entradas.move_to_end(entrada.normalizada)
                 while len(self._entradas) > self.max_entradas:
                     self._entradas.popitem(last=False)  # se descarta la mas antigua
+                if sesion:
+                    self._turnos[sesion] = self._turnos.get(sesion, 0) + 1
+                    self._turnos.move_to_end(sesion)
+                    while len(self._turnos) > self.max_entradas:
+                        self._turnos.popitem(last=False)
         except Exception as exc:  # noqa: BLE001 - frontera deliberada
             log.warning("no se pudo guardar en el cache: %s", exc)
 
@@ -203,6 +239,7 @@ class CacheSemantico:
     def reset(self) -> None:
         with self._lock:
             self._entradas.clear()
+            self._turnos.clear()
         self.aciertos = 0
         self.consultas = 0
 

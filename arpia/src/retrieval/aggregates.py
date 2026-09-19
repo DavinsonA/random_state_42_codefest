@@ -34,21 +34,38 @@ _lock = threading.Lock()
 
 
 def tabla() -> list[dict[str, Any]]:
-    """Tabla de documentos, cacheada. Lista vacia si el indice no esta."""
+    """Tabla de documentos, cacheada. Lista vacia si el indice no esta.
+
+    **El fallo no se cachea.** Si el volumen del indice aun no esta montado
+    cuando llega la primera peticion, cachear la lista vacia dejaria el tablero
+    en blanco hasta reiniciar el contenedor, respondiendo 200 y sin un solo
+    aviso. Paso exactamente eso esta noche con una ruta mal configurada:
+    `/api/view` devolvia `total: 0` con el corpus entero en disco.
+    """
     global _tabla
-    if _tabla is not None:
+    if _tabla:
         return _tabla
     with _lock:
-        if _tabla is None:
-            try:
-                from src.tools.corpus import _get_index
+        if _tabla:
+            return _tabla
+        try:
+            from src.tools.corpus import _get_index
 
-                _tabla = _get_index().document_table()
-                log.info("tabla de agregacion: %s documentos", len(_tabla))
-            except Exception as exc:  # noqa: BLE001 - frontera: nunca tumba el turno
-                log.warning("no se pudo construir la tabla de agregacion: %s", exc)
-                _tabla = []
+            filas = _get_index().document_table()
+        except Exception as exc:  # noqa: BLE001 - frontera: nunca tumba el turno
+            log.warning("no se pudo construir la tabla de agregacion: %s", exc)
+            return []
+        if not filas:
+            log.warning("la tabla de agregacion salio vacia; no se cachea")
+            return []
+        _tabla = filas
+        log.info("tabla de agregacion: %s documentos", len(_tabla))
     return _tabla
+
+
+def disponible() -> bool:
+    """True si hay tabla con la que responder. Lo consulta el tablero."""
+    return bool(tabla())
 
 
 def reset() -> None:

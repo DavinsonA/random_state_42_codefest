@@ -269,3 +269,30 @@ def test_sin_rango_no_se_pierde_nada_y_no_hay_aviso_de_fecha():
     body = client.post("/api/view", json={"chart": "bar", "group_by": "organizacion"}).json()
     assert body["cobertura"]["excluidos_por_fecha"] == 0
     assert "deja fuera" not in body["aviso"]
+
+
+# -- el corpus ausente no se cachea como "vacio" ----------------------------
+
+
+def test_sin_corpus_los_endpoints_dicen_no_disponible(monkeypatch):
+    """Si el volumen del indice aun no esta montado cuando llega la primera
+    peticion, cachear la lista vacia dejaria el tablero en blanco hasta
+    reiniciar, respondiendo 200 y sin un solo aviso."""
+    from src.retrieval import aggregates
+
+    monkeypatch.setattr(aggregates, "tabla", list)
+    for ruta in ("/api/aggregate", "/api/timeline"):
+        cuerpo = client.get(ruta).json()
+        assert cuerpo["disponible"] is False
+        assert "no esta cargado" in cuerpo["motivo"]
+    cuerpo = client.post("/api/view", json={"chart": "bar"}).json()
+    assert cuerpo["disponible"] is False
+
+
+def test_una_tabla_vacia_no_se_cachea():
+    from src.retrieval import aggregates
+
+    aggregates.reset()
+    assert aggregates.tabla() == [] or aggregates.tabla()
+    # el fallo no queda fijado: el siguiente intento vuelve a construirla
+    assert aggregates._tabla is None or aggregates._tabla

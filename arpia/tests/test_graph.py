@@ -432,3 +432,33 @@ def test_ejecutor_no_registrado_devuelve_error_en_vez_de_lanzar(monkeypatch):
     monkeypatch.delitem(executors.EJECUTORES, "agente_analitico")
     r = executors.ejecutar(Paso(agente="agente_analitico", consulta="x"))
     assert r.error and not r.evidencia
+
+
+# -- presupuesto de tiempo del turno ----------------------------------------
+
+
+def test_sin_tiempo_no_se_redacta_y_se_entrega_la_evidencia(entorno, monkeypatch):
+    """El frontend abandona a los 90 s. Mas vale una respuesta imperfecta que
+    una que no llega."""
+    from src.agents import budget
+
+    g, llm, _ = entorno()
+    monkeypatch.setattr(budget, "alcanza", lambda coste=0.0: False)
+    out = g.invoke({"question": "satelites"}, _config())
+    assert llm.redacciones == 0
+    assert "F1-DOC-0" in out["answer"]  # la evidencia recuperada, sin redactar
+
+
+def test_sin_tiempo_no_se_replanifica(entorno, monkeypatch):
+    from src.agents import budget
+
+    g, llm, _ = entorno(score=0.1)
+    monkeypatch.setattr(budget, "alcanza", lambda coste=0.0: False)
+    g.invoke({"question": "algo que no esta"}, _config())
+    assert llm.planes == 1  # la replanificacion son dos llamadas mas
+
+
+def test_con_tiempo_de_sobra_el_turno_es_el_normal(entorno):
+    g, llm, _ = entorno()
+    g.invoke({"question": "satelites"}, _config())
+    assert llm.planes == 1 and llm.redacciones == 1
