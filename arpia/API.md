@@ -4,7 +4,7 @@
 > ADL*; este documento dice *qué hay construido, cómo funciona y qué falta*.
 > Ante conflicto con la Especificación Técnica de ADL, manda la de ADL.
 >
-> Fecha de corte: `main` @ `adea37f` + trazabilidad de los conteos (19 de septiembre de 2026).
+> Fecha de corte: `main` @ `c92029b` + trazabilidad de los conteos (19 de septiembre de 2026).
 > Si cambias el contrato o el comportamiento de un endpoint, **actualiza este archivo
 > en el mismo commit**. Un documento desactualizado es peor que ninguno.
 
@@ -35,7 +35,7 @@
 | Chat web (`chat.html`), sin CDN | ✅ hecho | `src/ui/static/` |
 | Tablero web (`dashboard.html`) y librerías vendorizadas (Plotly, Leaflet) | ❌ **no existen**: `dashboard.*` muestra un aviso (§14) | `src/ui/static/` |
 
-**Lo más importante que hay que saber:** el backend está construido y sus 279 pruebas
+**Lo más importante que hay que saber:** el backend está construido y sus 319 pruebas
 pasan; **casi todas usan modelos falsos**, y con el modelo real solo hay pruebas manuales
 (§11). Esas pruebas manuales, hechas el 19 de septiembre con el índice de la Etapa 1, el
 encoder `bge-m3` y LiteLLM, **funcionan de punta a punta** (pregunta documental, cuantitativa
@@ -387,6 +387,17 @@ revisión con modelo.
 El verificador **está declarado en la agent card** (`adea37f`) con el modelo de `agente_documental`, y
 aparece en `agentes_invocados` y `tokens_por_agente` solo cuando llama al modelo.
 
+### 5.7 Voz del sistema (`src/agents/voz.py`)
+
+Desde `cacadf9` y `c92029b`, todo el texto que lee el usuario nace de un solo módulo: el **registro** que
+comparten los prompts y las ocho respuestas fijas (rechazos, degradaciones). Es un registro de producto
+analítico: conclusión primero, impersonal, procedencia caracterizada (`AI Index Stanford (2018,
+F1-AIINDEX-016)` en vez de un identificador opaco) y lo no cubierto por el corpus en su propio párrafo. **Sin
+pronósticos ni escalas estimativas** (`RETO.md` prohíbe fabricar una medición) y con **neutralidad técnica**
+explícita (Toxicity es el 15% del bloque de calidad y el corpus trata de actores armados y capacidades
+antisatélite). El orquestador, el redactor, el verificador y el visualizador usan el mismo registro (el del
+visualizador es una versión breve). Coste medido por el equipo: ~20% más de tokens por redacción.
+
 ---
 
 ## 6. Agentes y modelos
@@ -547,10 +558,10 @@ cp .env.example .env                                        # y rellenar; ARPIA_
 uv run uvicorn src.api.main:app --reload --port 8000
 
 uv run ruff check src tests --fix && uv run ruff format src tests
-uv run pytest tests -q                                      # 279 casos
+uv run pytest tests -q                                      # 319 casos
 ```
 
-279 casos en total (algunas funciones están parametrizadas; la columna cuenta funciones).
+319 casos en total (algunas funciones están parametrizadas; la columna cuenta funciones).
 
 | Archivo de pruebas | Qué protege | Funciones |
 |---|---|---|
@@ -566,6 +577,7 @@ uv run pytest tests -q                                      # 279 casos
 | `test_enrich.py` | `organizacion` y `anio` derivados | 8 |
 | `test_dashboard.py` | endpoints `/api/*`: nunca 500, cobertura, trazabilidad, `geo` no disponible | 23 |
 | `test_verifier.py` | disparadores del verificador, degradación y que no salte en respuestas sanas ni en conteos | 13 |
+| `test_voz.py` | la voz del sistema vive en un solo módulo; ningún prompt define su propio tono | 15 |
 | `test_trazabilidad_analitico.py` | cada cifra cita sus documentos; `citations` y `retrieval_context` llenos; el verificador no reescribe un conteo trazable; el conteo no se cae si el índice falla | 12 |
 | `test_theme.py` | ningún color hexadecimal fuera de `src/theme/` | 6 |
 
@@ -627,7 +639,7 @@ orquestador, el caché y la memoria con su evidencia, su propuesta de arreglo y 
 | 19 | ✅ `/api/trace` **cerrado en `86e8244`** (solo con `ARPIA_DEBUG_TRACE`). El resto de `/api/*` sigue siendo público y de solo lectura, en los tres dominios | Lo público ya no expone preguntas ni salidas del modelo | Confirmar que `ARPIA_DEBUG_TRACE` queda vacío en Coolify |
 | 20 | **El chat no usa `/api/evidence`**: `api.js` no tiene esa función, así que hacer clic en una cita no abre el fragmento | `FRONTEND.md` lo llama "requisito obligatorio de la especificación" | Añadir `obtenerEvidencia(chunk_id)` a `api.js` y enlazarlo en `chat.js` |
 | 21 | ✅ **Resuelto con el presupuesto de tiempo (#6).** Timeout del front (90 s) vs peor caso del backend | — | — |
-| 22 | **El orquestador falla en las preguntas cuantitativas de un solo paso con el modelo real.** `gpt-oss-120b` devuelve la clave `Pasos` (el `title` que pydantic pone a la propiedad `pasos` en el esquema) y `Plan` (`extra="forbid"`) la rechaza; se usa el plan de respaldo, que **siempre** manda al documental. Reproducido de forma determinista con "¿Cuántos documentos hay por fenómeno?" y "¿Cuántos documentos publica cada organización?"; las preguntas documentales y de vista sí se planifican bien | La pregunta cuantitativa más típica se contesta por búsqueda semántica ("no se proporciona un número") en vez de con el conteo exacto. Es el agente que da los puntos extra | Aceptar `Pasos`/`pasos` (validador `mode="before"` que normalice las claves) y/o quitar los `title` del esquema; que `plan_de_respaldo` mande a `agente_analitico` cuando la pregunta sea de conteo |
+| 22 | **El orquestador falla de forma intermitente con el modelo real.** `gpt-oss-120b` devuelve la clave `Pasos` (el `title` que pydantic pone a la propiedad `pasos`) y `Plan` (`extra="forbid"`) la rechaza; se usa el plan de respaldo, que **siempre** manda al documental. **No depende del tipo de pregunta**: con `4ae60f9` fallaban las de conteo (2 de 2) y con `c92029b` fallan la documental y la de vista, mientras la de conteo funciona | Con el código actual, 2 de 3 preguntas típicas se responden sin orquestador ni analítico: un conteo devuelve "no se proporciona un número" y una vista devuelve texto sin `ViewSpec`. Es el agente que da los puntos extra | Aceptar `Pasos`/`pasos` (validador `mode="before"` que normalice las claves) y/o quitar los `title` del esquema; reintentar una vez antes de caer al respaldo; que `plan_de_respaldo` mande a `agente_analitico` cuando la pregunta sea de conteo |
 | 23 | **El caché semántico guarda como buena la respuesta del plan de respaldo** (`estado: ok`) | Un fallo transitorio del modelo queda congelado: repetir la pregunta devuelve la respuesta mala con `cache:1.00` hasta reiniciar | No cachear turnos cuyo plan fue de respaldo |
 | 24 | **Ningún agente lee la conversación.** El historial se guarda en SQLite pero `planificar(pregunta)` y `redactar(pregunta, evidencia)` solo reciben el texto de la pregunta | Una pregunta de seguimiento se responde sin contexto y gasta tokens (4.442 en la prueba); ADL evalúa preguntas sueltas, pero el chat real las necesita | Pasar las últimas vueltas al orquestador y al redactor |
 
@@ -689,6 +701,8 @@ orquestador, el caché y la memoria con su evidencia, su propuesta de arreglo y 
 | `29bdf0f` | cada cifra de un conteo cita los documentos que la sustentan (`citations`, `retrieval_context`) |
 | `cfa7c79` | las delegaciones del orquestador quedan en `tools_called`; la card gana `delegar_analitico` |
 | `adea37f` | presupuesto de tiempo por turno, caché por conversación, arranque que precalienta, verificador en la card |
+| `cacadf9` | `voz.py`: el texto que lee el usuario nace de un solo módulo, con registro de producto analítico |
+| `c92029b` | los cuatro prompts (orquestador, redactor, verificador, visualizador) usan la misma voz |
 
 ---
 

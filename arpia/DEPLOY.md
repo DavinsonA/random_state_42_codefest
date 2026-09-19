@@ -7,7 +7,7 @@
 > exige ADL en [`../RETO.md`](../RETO.md).
 >
 > Estado: **análisis hecho, nada modificado todavía** (ni `Dockerfile` ni `compose`).
-> Fecha de corte: `main` @ `adea37f`, 19 de septiembre de 2026.
+> Fecha de corte: `main` @ `c92029b`, 19 de septiembre de 2026.
 
 ---
 
