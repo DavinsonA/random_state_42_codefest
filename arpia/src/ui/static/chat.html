@@ -3,72 +3,78 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>A.R.P.I.A. · Asistente de análisis</title>
+    <title data-i18n="chat.titulo">A.R.P.I.A. · Asistente de análisis</title>
     <meta name="description" content="Asistente multiagente de análisis de fuentes abiertas sobre inteligencia aeroespacial, con evidencia citada.">
-    <link rel="stylesheet" href="/static/css/tokens.css">
-    <link rel="stylesheet" href="/static/css/app.css">
-    <link rel="stylesheet" href="/static/css/referencias.css">
-    <script type="module" src="/static/js/chat.js"></script>
+    <link rel="icon" type="image/png" sizes="64x64" href="img/favicon.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png">
+    <!-- rutas relativas: funcionan servidas por el backend (static/ montado en /)
+         y abiertas con Live Server -->
+    <link rel="stylesheet" href="css/tokens.css">
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/referencias.css">
+    <script type="module" src="js/chat.js"></script>
 </head>
 <body class="pagina-chat">
 
+    <!-- pantalla de carga: visible desde el primer pintado (js/transiciones.js) -->
+    <div class="cargador" id="cargador" role="status" aria-live="polite">
+        <div class="cargador-orbita" aria-hidden="true"><span class="cargador-satelite"></span></div>
+        <p class="cargador-texto" data-i18n="cargador.texto">Cargando</p>
+    </div>
+
     <header class="barra">
 <div class="marca">
-    <img src="/static/img/logo.png" alt="A.R.P.I.A." class="marca-fac">
-    <img src="/static/logo.jpg" alt="A.R.P.I.A." class="marca-logo">
-    <span class="marca-sub">Aplicativo de Recuperación, Predicción e Inteligencia Agéntica </span>
+    <img src="img/logo.png" alt="A.R.P.I.A." class="marca-fac">
+    <img src="logo.jpg" alt="A.R.P.I.A." class="marca-logo">
+    <span class="marca-sub" data-i18n="chat.sub">Aplicativo de Recuperación, Predicción e Inteligencia Agéntica</span>
 </div>
 
-        <div class="barra-acciones">
+        <div class="barra-acciones" id="barra-acciones">
+            <a class="boton boton-secundario" id="enlace-tablero" href="#" hidden data-i18n="chat.tablero">Tablero</a>
+            <button type="button" class="boton boton-secundario" id="nueva-conversacion" data-i18n="chat.nueva">Nueva conversación</button>
             <span class="salud" id="salud" data-estado="cargando" role="status">
                 <span class="salud-punto" aria-hidden="true"></span>
-                <span class="salud-texto">Verificando servicio…</span>
+                <span class="salud-texto" data-i18n="salud.verificando">Verificando servicio…</span>
             </span>
-            <button type="button" class="boton boton-secundario" id="nueva-conversacion">
-                Nueva conversación
-            </button>
-            <a class="boton boton-secundario" id="enlace-tablero" href="#" hidden>Tablero</a>
+            <!-- el selector de idioma lo agrega i18n.js aqui, al final -->
         </div>
     </header>
 
     <div class="aviso aviso-simulado" id="aviso-stub" role="alert" hidden>
-        <strong>Modo simulado.</strong>
-        Este servicio responde con datos de prueba (<code>ARPIA_MODE=stub</code>): nada de lo que ves proviene del corpus.
+        <strong data-i18n="aviso.stub.titulo">Modo simulado.</strong>
+        <span data-i18n="aviso.stub.chat" data-codigo="ARPIA_MODE=stub">Este servicio responde con datos de prueba (ARPIA_MODE=stub): nada de lo que ves proviene del corpus.</span>
     </div>
 
     <main class="chat">
-        <section class="conversacion" id="conversacion" role="log" aria-live="polite" aria-label="Conversación">
+        <section class="conversacion" id="conversacion" role="log" aria-live="polite" aria-label="Conversación" data-i18n-aria="chat.conversacion">
 
             <div class="bienvenida" id="bienvenida">
-                <h1>¿Qué quieres analizar?</h1>
-                <p>
-                    Respondo sobre el corpus de fuentes abiertas de los tres fenómenos del reto.
-                    Cada respuesta cita el documento y el fragmento de donde sale.
-                </p>
+                <h1 data-i18n="chat.bienvenida.titulo">¿Qué quieres analizar?</h1>
+                <p data-i18n="chat.bienvenida.texto">Respondo sobre el corpus de fuentes abiertas de los tres fenómenos del reto. Cada respuesta cita el documento y el fragmento de donde sale.</p>
 
-                <ul class="fenomenos" aria-label="Fenómenos del corpus">
-                    <li class="fenomeno" data-fenomeno="F1"><span class="fenomeno-id">F1</span> IA y Capacidades Estratégicas</li>
-                    <li class="fenomeno" data-fenomeno="F2"><span class="fenomeno-id">F2</span> Seguridad del Entorno Espacial</li>
-                    <li class="fenomeno" data-fenomeno="F3"><span class="fenomeno-id">F3</span> Dinámicas Territoriales</li>
+                <ul class="fenomenos" aria-label="Fenómenos del corpus" data-i18n-aria="chat.fenomenos">
+                    <li class="fenomeno" data-fenomeno="F1"><span class="fenomeno-id">F1</span> <span data-i18n="fenomeno.F1">IA y Capacidades Estratégicas</span></li>
+                    <li class="fenomeno" data-fenomeno="F2"><span class="fenomeno-id">F2</span> <span data-i18n="fenomeno.F2">Seguridad del Entorno Espacial</span></li>
+                    <li class="fenomeno" data-fenomeno="F3"><span class="fenomeno-id">F3</span> <span data-i18n="fenomeno.F3">Dinámicas Territoriales</span></li>
                 </ul>
 
-                <p class="etiqueta">Preguntas de ejemplo</p>
+                <p class="etiqueta" data-i18n="chat.ejemplos">Preguntas de ejemplo</p>
                 <div class="ejemplos" id="ejemplos">
-                    <button type="button" class="ejemplo">¿Qué reporta el corpus sobre capacidades antisatélite en 2024?</button>
-                    <button type="button" class="ejemplo">¿Cómo difiere el enfoque de dos países frente a la órbita baja terrestre?</button>
-                    <button type="button" class="ejemplo">¿Qué actores aparecen asociados a dinámicas territoriales en la frontera?</button>
-                    <button type="button" class="ejemplo">¿Cuántos documentos hay por fenómeno?</button>
+                    <button type="button" class="ejemplo" data-i18n="chat.ejemplo1">¿Qué reporta el corpus sobre capacidades antisatélite en 2024?</button>
+                    <button type="button" class="ejemplo" data-i18n="chat.ejemplo2">¿Cómo difiere el enfoque de dos países frente a la órbita baja terrestre?</button>
+                    <button type="button" class="ejemplo" data-i18n="chat.ejemplo3">¿Qué actores aparecen asociados a dinámicas territoriales en la frontera?</button>
+                    <button type="button" class="ejemplo" data-i18n="chat.ejemplo4">¿Cuántos documentos hay por fenómeno?</button>
                 </div>
             </div>
 
         </section>
 
         <form class="composer" id="composer" autocomplete="off">
-            <label class="sr-only" for="entrada">Escribe tu consulta</label>
+            <label class="sr-only" for="entrada" data-i18n="chat.entrada.label">Escribe tu consulta</label>
             <textarea id="entrada" name="texto" rows="1" maxlength="4000"
-                      placeholder="Escribe tu consulta sobre el corpus…" required></textarea>
-            <button type="submit" class="boton boton-primario" id="enviar">Enviar</button>
-            <p class="composer-ayuda">Enter envía · Shift+Enter nueva línea</p>
+                      placeholder="Escribe tu consulta sobre el corpus…" data-i18n-placeholder="chat.entrada.placeholder" required></textarea>
+            <button type="submit" class="boton boton-primario" id="enviar" data-i18n="chat.enviar">Enviar</button>
+            <p class="composer-ayuda" data-i18n="chat.ayuda">Enter envía · Shift+Enter nueva línea</p>
         </form>
     </main>
 

@@ -364,16 +364,24 @@ def analitico(paso: Paso) -> Resultado:
     # agente conteste por una dimension distinta de la preguntada.
     group_by = paso.group_by or _dimension(paso.consulta)
     metrica = "conteo_fragmentos" if "fragmento" in paso.consulta.lower() else "conteo_documentos"
+    # El periodo y el tope ("entre 2020 y 2025", "las 5 organizaciones") se leen de la consulta:
+    # sin esto el texto contestaba con todos los anos y todas las categorias aunque la pregunta
+    # pidiera un recorte, y la vista y el texto decian cosas distintas.
+    from src.agents.vista_respaldo import limite_de_pregunta, periodo_de_pregunta  # noqa: PLC0415
+
+    desde, hasta = periodo_de_pregunta(paso.consulta)
+    limite = None if group_by == "anio" else limite_de_pregunta(paso.consulta)
     resultado = aggregates.agregar(
         metrica=metrica,  # type: ignore[arg-type]
         group_by=group_by,  # type: ignore[arg-type]
         fenomenos=[paso.fenomeno] if paso.fenomeno else None,  # type: ignore[list-item]
+        desde=int(desde) if desde else None,
+        hasta=int(hasta) if hasta else None,
+        **({"limite": limite} if limite else {}),
     )
-    turnlog.record_tool_call(
-        "consultar_agregado",
-        {"metrica": metrica, "group_by": group_by, "fenomenos": paso.fenomeno or ""},
-        json.dumps(resultado, ensure_ascii=False),
-    )
+    parametros = {"metrica": metrica, "group_by": group_by, "fenomenos": paso.fenomeno or ""}
+    parametros.update({k: v for k, v in (("desde", desde), ("hasta", hasta), ("limite", limite)) if v})
+    turnlog.record_tool_call("consultar_agregado", parametros, json.dumps(resultado, ensure_ascii=False))
 
     filas = resultado["filas"]
     if not filas:
@@ -411,6 +419,12 @@ def analitico(paso: Paso) -> Resultado:
             f"{cobertura['sin_dato_en_la_dimension']} de "
             f"{cobertura['documentos_en_dimension']} documentos no declaran "
             f"{dimension} y quedan fuera de este conteo."
+        )
+
+    if (desde or hasta) and group_by != "anio" and cobertura.get("excluidos_por_fecha"):
+        aviso = (
+            f"{aviso + ' ' if aviso else ''}El periodo pedido deja fuera "
+            f"{cobertura['excluidos_por_fecha']} documentos (todos los que no declaran año)."
         )
 
     # Lo que ADL llama `retrieval_context`: lo que se uso para armar la respuesta.
@@ -457,12 +471,21 @@ AGENTE_VISUALIZADOR = "agente_visualizador"
 
 @registrar(AGENTE_VISUALIZADOR)
 def visualizador(paso: Paso) -> Resultado:
-    """Emite un `ViewSpec` validado. UNA llamada, al modelo pequeno.
+    """Emite un `ViewSpec` validado. UNA llamada.
 
-    El modelo grande no compra nada aqui: la salida es JSON dentro de un
-    vocabulario cerrado, no prosa. Si lo que emite no valida, se descarta y el
-    turno sigue con la respuesta de texto: una vista invalida no puede llegar al
-    tablero ni tumbar la respuesta.
+    **Por que el modelo grande, si la salida es JSON.** El razonamiento fue que
+    un vocabulario cerrado no necesita capacidad: solo hay que elegir dentro de
+    una lista. Lo que se midio despues dice otra cosa —el modelo pequeno
+    devolvia las claves con la capitalizacion del esquema (`Chart`, `Group By`),
+    y con `serie_por` visible cambiaba el fenomeno filtrado en 4 de 4 corridas—.
+    Elegir bien dentro de una lista cerrada SI es razonamiento cuando la
+    pregunta es ambigua: que dimension responde lo que se pregunto, y si el
+    periodo mencionado es un filtro o solo contexto.
+
+    El coste extra esta acotado: una llamada por turno, y solo en los turnos que
+    piden vista. Si lo que emite no valida, se descarta y el turno sigue con la
+    respuesta de texto: una vista invalida no puede llegar al tablero ni tumbar
+    la respuesta.
     """
     from src.api.contracts import ViewSpec
     from src.tools.analytics import componentes_disponibles

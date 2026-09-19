@@ -23,3 +23,12 @@ data/
 
 # Documentos ---
 docs/
+# Excepcion a `docs/` (linea 25). Esa regla estaba pensada para docs generados,
+# pero se lleva por delante dos cosas que son entregables de la Especificacion:
+# el documento de arquitectura (§1.4) y el material del pitch. Ademas
+# `src/theme/tokens.py` lee `docs/design/design-tokens.json` en tiempo de
+# ejecucion: lo que no esta en el repositorio no llega al contenedor.
+!arpia/docs/
+!arpia/docs/**
+!arpia-bundle/docs/
+!arpia-bundle/docs/**

@@ -83,6 +83,42 @@ def _valor(fila: dict[str, Any], dimension: GroupBy) -> str:
     return str(fila.get(dimension) or "")
 
 
+def _seleccion(
+    fenomenos: list[Fenomeno] | None,
+    organizacion: str | None,
+    desde: int | None,
+    hasta: int | None,
+    formato: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    """Filas que entran en una agregacion.
+
+    Returns:
+        `(filas, dimensionado, universo)`: las filas tras TODOS los filtros, las
+        que quedan antes del filtro temporal (base de la cobertura) y el tamano
+        de la tabla entera.
+
+    La cobertura se mide ANTES del filtro temporal, y el motivo es concreto:
+    un rango de anos descarta en silencio los documentos sin ano, asi que
+    medirla despues daria siempre "0 sin dato" — justo el mensaje tranquilizador
+    y falso que ese campo existe para evitar.
+    """
+    filas = tabla()
+    universo = len(filas)
+    if fenomenos:
+        permitidos = set(fenomenos)
+        filas = [f for f in filas if f.get("fenomeno") in permitidos]
+    if organizacion:
+        filas = [f for f in filas if f.get("organizacion") == organizacion]
+    if formato:
+        filas = [f for f in filas if f.get("formato") == formato]
+    dimensionado = list(filas)
+    if desde is not None:
+        filas = [f for f in filas if f.get("anio") and f["anio"] >= desde]
+    if hasta is not None:
+        filas = [f for f in filas if f.get("anio") and f["anio"] <= hasta]
+    return filas, dimensionado, universo
+
+
 def agregar(
     metrica: Metrica = "conteo_documentos",
     group_by: GroupBy = "fenomeno",
@@ -110,26 +146,8 @@ def agregar(
         fuera por no tener el dato de la dimension pedida, medido antes de
         aplicar el rango temporal.
     """
-    filas = tabla()
-    universo = len(filas)
-
-    if fenomenos:
-        permitidos = set(fenomenos)
-        filas = [f for f in filas if f.get("fenomeno") in permitidos]
-    if organizacion:
-        filas = [f for f in filas if f.get("organizacion") == organizacion]
-
-    # La cobertura se mide ANTES del filtro temporal, y el motivo es concreto:
-    # un rango de anos descarta en silencio los documentos sin ano, asi que
-    # medirla despues daria siempre "0 sin dato" — justo el mensaje tranquilizador
-    # y falso que este campo existe para evitar.
-    dimensionado = list(filas)
+    filas, dimensionado, universo = _seleccion(fenomenos, organizacion, desde, hasta)
     sin_dato = sum(1 for f in dimensionado if not _valor(f, group_by))
-
-    if desde is not None:
-        filas = [f for f in filas if f.get("anio") and f["anio"] >= desde]
-    if hasta is not None:
-        filas = [f for f in filas if f.get("anio") and f["anio"] <= hasta]
     # Un rango de anos descarta TODO documento sin ano, agrupe por lo que
     # agrupe. Medido en el corpus: un rango 2005-2026 sobre un conteo por
     # organizacion deja 621 de 1.826 documentos y hace desaparecer al mayor
@@ -162,6 +180,157 @@ def agregar(
             "sin_dato_en_la_dimension": sin_dato,
             "excluidos_por_fecha": excluidos_por_fecha,
         },
+    }
+
+
+#: Tope de series por grafica: mas de esto no se distingue ni por color ni en la leyenda.
+MAX_SERIES = 8
+
+#: Categorias por grafica cuando la dimension no es el ano (que es una serie completa).
+MAX_CATEGORIAS = 25
+
+
+def agregar_series(
+    metrica: Metrica = "conteo_documentos",
+    group_by: GroupBy = "fenomeno",
+    serie_por: GroupBy | None = None,
+    *,
+    fenomenos: list[Fenomeno] | None = None,
+    organizacion: str | None = None,
+    desde: int | None = None,
+    hasta: int | None = None,
+    limite: int | None = None,
+) -> dict[str, Any]:
+    """Conteo en dos dimensiones: categorias (eje) x series (colores). CERO tokens.
+
+    Es lo que la GUI armaba con una peticion por fenomeno: `group_by` da las
+    categorias y `serie_por` cuantas series hay. Se calcula aqui, una vez, sobre
+    el mismo filtrado que `agregar`, para que las dos vistas de un dato jamas
+    discrepen.
+
+    Args:
+        limite: tope de categorias (las de mayor total); no aplica al ano.
+        serie_por: dimension que separa las series. None = una sola serie `total`.
+            No puede coincidir con `group_by`.
+
+    Returns:
+        `{"categorias": [...], "series": [{"clave", "valores", "doc_ids"}],
+        "total", "cobertura", "categorias_omitidas", "series_omitidas"}`.
+        `valores[i]` y `doc_ids[i]` corresponden a `categorias[i]`. Las
+        categorias van cronologicas si `group_by` es el ano y por total
+        descendente en los demas casos; `doc_ids` es una muestra de 10.
+    """
+    if serie_por is not None and serie_por == group_by:
+        raise ValueError("serie_por no puede ser igual a group_by")
+
+    filas, dimensionado, universo = _seleccion(fenomenos, organizacion, desde, hasta)
+    sin_dato = sum(1 for f in dimensionado if not _valor(f, group_by))
+
+    peso = (lambda f: 1) if metrica == "conteo_documentos" else (lambda f: f["n_fragmentos"])
+    por_categoria: dict[str, int] = defaultdict(int)
+    celdas: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    muestras: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    for fila in filas:
+        categoria = _valor(fila, group_by)
+        serie = _valor(fila, serie_por) if serie_por else "total"
+        if not categoria or not serie:
+            continue
+        w = peso(fila)
+        por_categoria[categoria] += w
+        celdas[serie][categoria] += w
+        if len(muestras[serie][categoria]) < 10:
+            muestras[serie][categoria].append(fila["doc_id"])
+
+    temporal = group_by == "anio"
+    cuales = sorted(por_categoria, key=lambda c: (-por_categoria[c], c))
+    omitidas = 0
+    tope = min(MAX_CATEGORIAS, limite) if limite else MAX_CATEGORIAS
+    if not temporal and len(cuales) > tope:
+        omitidas = len(cuales) - tope
+        cuales = cuales[:tope]
+    categorias = sorted(cuales) if temporal else cuales
+
+    por_serie = {s: sum(celdas[s].get(c, 0) for c in categorias) for s in celdas}
+    # Las series de un fenomeno van en orden F1, F2, F3: el color de cada una no cambia entre vistas.
+    orden = sorted(
+        por_serie, key=(lambda s: s) if serie_por == "fenomeno" else (lambda s: (-por_serie[s], s))
+    )
+    series_omitidas = max(0, len(orden) - MAX_SERIES)
+    orden = orden[:MAX_SERIES]
+
+    return {
+        "metrica": metrica,
+        "group_by": group_by,
+        "serie_por": serie_por,
+        "categorias": categorias,
+        "series": [
+            {
+                "clave": s,
+                "valores": [celdas[s].get(c, 0) for c in categorias],
+                "doc_ids": [muestras[s].get(c, []) for c in categorias],
+            }
+            for s in orden
+        ],
+        "total": sum(por_serie[s] for s in orden),
+        "cobertura": {
+            "documentos_universo": universo,
+            "documentos_en_dimension": len(dimensionado),
+            "documentos_contados": len(filas),
+            "sin_dato_en_la_dimension": sin_dato,
+            "excluidos_por_fecha": len(dimensionado) - len(filas),
+        },
+        "categorias_omitidas": omitidas,
+        "series_omitidas": series_omitidas,
+    }
+
+
+#: Filas por pagina como maximo. Un documento pesa poco, pero una pagina sin tope
+#: convierte "ver los documentos de esta barra" en volcar el corpus entero.
+MAX_PAGINA = 100
+
+
+def documentos(
+    *,
+    fenomenos: list[Fenomeno] | None = None,
+    organizacion: str | None = None,
+    formato: str | None = None,
+    desde: int | None = None,
+    hasta: int | None = None,
+    limite: int = 25,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Lista paginada de documentos, con los mismos filtros que `agregar`. CERO tokens.
+
+    Existe porque cada fila de un agregado solo lleva una muestra de 10
+    `doc_id`: para "ver todos los documentos de esta barra" hace falta la lista.
+    Ordenada por `doc_id` para que la paginacion sea estable entre llamadas.
+
+    Returns:
+        `{"total", "siguiente", "filas", "excluidos_por_fecha"}`. `siguiente` es
+        el `offset` de la pagina siguiente, o None en la ultima.
+    """
+    limite = max(1, min(int(limite), MAX_PAGINA))
+    offset = max(0, int(offset))
+    filas, dimensionado, _ = _seleccion(fenomenos, organizacion, desde, hasta, formato)
+    filas = sorted(filas, key=lambda f: f["doc_id"])
+    pagina = filas[offset : offset + limite]
+    return {
+        "total": len(filas),
+        "siguiente": offset + limite if offset + limite < len(filas) else None,
+        "filas": [
+            {
+                "doc_id": f["doc_id"],
+                "organizacion": f.get("organizacion") or "",
+                "anio": f.get("anio"),
+                "formato": f.get("formato") or "",
+                "fenomeno": f.get("fenomeno") or "",
+                "fuente": f.get("fuente") or "",
+                "n_fragmentos": f.get("n_fragmentos") or 0,
+                "primer_chunk_id": f"{f['doc_id']}__chunk_000000",
+            }
+            for f in pagina
+        ],
+        "excluidos_por_fecha": len(dimensionado) - len(filas),
     }
 
 

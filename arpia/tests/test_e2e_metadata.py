@@ -84,5 +84,5 @@ def test_un_plan_paralelo_entrega_a_adl_toda_su_metadata(turno_paralelo):
     # ADL cruza el modelo REPORTADO contra la card; LiteLLM recibe otro id.
     assert porcion["agente_documental"].modelo == "llama-3.3-70b-instruct"
     assert porcion["orquestador"].modelo == "gpt-oss-120b"
-    assert porcion["agente_visualizador"].modelo == "gpt-oss-20b"
+    assert porcion["agente_visualizador"].modelo == "gpt-oss-120b"
     assert set(m.agentes_invocados) >= {"orquestador", "agente_visualizador", "agente_documental"}

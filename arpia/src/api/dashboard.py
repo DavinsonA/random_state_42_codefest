@@ -39,6 +39,20 @@ def _error(motivo: str, **extra: Any) -> JSONResponse:
     return JSONResponse(status_code=200, content={"disponible": False, "motivo": motivo, **extra})
 
 
+#: Nombre de cada fenomeno tal como lo lee el analista.
+NOMBRE_FENOMENO = {
+    "F1": "IA y Capacidades Estratégicas",
+    "F2": "Seguridad del Entorno Espacial",
+    "F3": "Dinámicas Territoriales",
+}
+
+
+def _etiqueta_serie(serie_por: str | None, clave: str) -> str:
+    if serie_por == "fenomeno" and clave in NOMBRE_FENOMENO:
+        return f"{clave} · {NOMBRE_FENOMENO[clave]}"
+    return "Total" if clave == "total" else clave.replace("_", " ")
+
+
 @router.get("/components")
 def components() -> JSONResponse:
     """Catalogo de componentes y dimensiones con datos reales detras.
@@ -49,9 +63,17 @@ def components() -> JSONResponse:
     try:
         import json
 
+        from src.api.contracts import REGLAS_GRAFICO
+        from src.retrieval.aggregates import MAX_CATEGORIAS, MAX_SERIES
         from src.tools.analytics import componentes_disponibles
 
-        return JSONResponse(content=json.loads(componentes_disponibles()))
+        # Las reglas van AQUI y no en `componentes_disponibles`: esa funcion tambien
+        # es lo que lee el visualizador, y cambiar lo que el modelo lee mueve sus
+        # decisiones (medido: un campo de mas cambio F3 por F1).
+        catalogo = json.loads(componentes_disponibles())
+        catalogo["reglas"] = REGLAS_GRAFICO
+        catalogo["limites"] = {"categorias": MAX_CATEGORIAS, "series": MAX_SERIES}
+        return JSONResponse(content=catalogo)
     except Exception as exc:  # noqa: BLE001 - el tablero nunca recibe un 500
         log.warning("catalogo no disponible: %s", exc)
         return _error(f"catalogo no disponible: {type(exc).__name__}")
@@ -93,6 +115,55 @@ def aggregate(
     except Exception as exc:  # noqa: BLE001
         log.warning("agregacion fallida: %s", exc)
         return _error(f"agregacion no disponible: {type(exc).__name__}")
+
+
+@router.get("/documentos")
+def documentos(
+    fenomeno: str = Query("", description='Ids separados por coma: "F1,F3"'),
+    organizacion: str = Query(""),
+    formato: str = Query(""),
+    desde: int | None = Query(None),
+    hasta: int | None = Query(None),
+    limite: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> JSONResponse:
+    """Los documentos detras de una cifra: lista paginada y filtrable.
+
+    Cada fila de `/api/aggregate` trae solo una muestra de 10 `doc_id`. Esto es
+    la lista completa —con los mismos filtros—, para abrir "todos los
+    documentos de esta barra". `primer_chunk_id` enlaza a `/api/evidence` y
+    `doc_id` a `/api/document/{doc_id}`: de la cifra al fragmento en dos clics.
+    """
+    try:
+        from src.retrieval import aggregates
+
+        if not aggregates.disponible():
+            return _error("el corpus aun no esta cargado en este despliegue")
+
+        lista = [f.strip().upper() for f in fenomeno.split(",") if f.strip()]
+        invalidos = [f for f in lista if f not in ("F1", "F2", "F3")]
+        if invalidos:
+            return _error(f"fenomeno no valido: {', '.join(invalidos)} (usa F1, F2 o F3)")
+
+        datos = aggregates.documentos(
+            fenomenos=lista or None,  # type: ignore[arg-type]
+            organizacion=organizacion or None,
+            formato=formato or None,
+            desde=desde,
+            hasta=hasta,
+            limite=limite,
+            offset=offset,
+        )
+        aviso = ""
+        if datos["excluidos_por_fecha"]:
+            aviso = (
+                f"El rango de anos deja fuera {datos['excluidos_por_fecha']} documentos, "
+                "incluidos todos los que no declaran fecha."
+            )
+        return JSONResponse(content={"disponible": True, **datos, "aviso": aviso})
+    except Exception as exc:  # noqa: BLE001 - el tablero nunca recibe un 500
+        log.warning("lista de documentos fallida: %s", exc)
+        return _error(f"documentos no disponibles: {type(exc).__name__}")
 
 
 @router.get("/timeline")
@@ -142,6 +213,91 @@ def timeline(
         return _error(f"linea de tiempo no disponible: {type(exc).__name__}")
 
 
+def dimension_efectiva(vista: Any) -> str:
+    """Por que dimension agrupa realmente una vista.
+
+    Una vista temporal agrupa por año diga lo que diga el agente: es la unica
+    granularidad que el corpus sostiene, y una linea de tiempo por organizacion
+    no es una linea de tiempo (`REGLAS_GRAFICO`).
+
+    Vive aqui, en una sola funcion, porque el criterio lo usan dos caminos
+    —`POST /api/view` y el compositor del turno— y dos copias del mismo criterio
+    divergen a la primera que alguien toque una.
+    """
+    if vista.chart == "timeline":
+        return "anio"
+    return vista.group_by or "fenomeno"
+
+
+def filas_de_vista(vista: Any) -> list[dict[str, Any]]:
+    """Resuelve un `ViewSpec` a sus filas agregadas. CERO tokens.
+
+    Nunca lanza: sin indice o con una agregacion imposible devuelve una lista
+    vacia, y quien llame decide que hacer. Es deliberado —lo usa el compositor
+    en pleno turno, y un fallo al proponer una vista de apoyo no puede tumbar
+    la respuesta que el usuario esta esperando.
+    """
+    from src.retrieval import aggregates
+
+    if not aggregates.disponible():
+        return []
+    try:
+        datos = aggregates.agregar(
+            metrica=vista.metrica,
+            group_by=dimension_efectiva(vista),  # type: ignore[arg-type]
+            fenomenos=list(vista.fenomenos) or None,
+            desde=int(vista.desde) if vista.desde else None,
+            hasta=int(vista.hasta) if vista.hasta else None,
+            limite=100,
+        )
+    except Exception as exc:  # noqa: BLE001 - frontera: nunca tumba el turno
+        log.warning("no se pudieron resolver las filas de la vista: %s", exc)
+        return []
+    return list(datos.get("filas") or [])
+
+
+def serie_efectiva(vista: Any, group_by: str) -> str | None:
+    """Que dimension separa las series de una vista.
+
+    Con `serie_por` explicito, esa. Sin el, una vista agrupada por otra cosa que
+    el fenomeno trae una serie por fenomeno: es lo que los graficos apilan y
+    colorean, y hasta ahora lo armaba la GUI con una peticion por fenomeno.
+    """
+    if getattr(vista, "serie_por", None):
+        return vista.serie_por
+    return "fenomeno" if group_by != "fenomeno" else None
+
+
+def _a_fila(f: dict[str, Any]) -> Any:
+    from src.agents.hallazgos import Fila
+
+    return Fila(
+        clave=str(f.get("clave", "")),
+        valor=int(f.get("valor") or 0),
+        doc_ids=[str(d) for d in (f.get("doc_ids") or [])],
+    )
+
+
+def apoyo_de_vista(vista: Any, crudas: list[dict[str, Any]]) -> tuple[list[Any], list[Any]]:
+    """Vistas de apoyo y hallazgos de una vista ya agregada. CERO tokens.
+
+    Es UN solo camino para `/chat` y `POST /api/view`: el chat lo usa al cerrar
+    el turno y el tablero al pintar una vista que nacio de un clic. Si fueran
+    dos copias, el mismo grafico diria cosas distintas segun de donde llegue.
+
+    Returns:
+        `(vistas, hallazgos)`. `vistas` empieza SIEMPRE por `vista`.
+    """
+    from src.agents import compositor, hallazgos
+
+    filas = [_a_fila(f) for f in crudas]
+    return compositor.componer(vista, filas), hallazgos.describir(filas, dimension_efectiva(vista))
+
+
+def _hallazgo_json(h: Any) -> dict[str, Any]:
+    return {"texto": h.texto, "soporte": list(h.soporte), "doc_ids": list(h.doc_ids)}
+
+
 @router.post("/view")
 def view(spec: dict[str, Any]) -> JSONResponse:
     """Resuelve un `ViewSpec` a los datos que el tablero debe pintar.
@@ -162,9 +318,11 @@ def view(spec: dict[str, Any]) -> JSONResponse:
         spec: el `ViewSpec` tal cual lo emitio el agente.
 
     Returns:
-        `{disponible, chart, titulo, metrica, group_by, filas, total, cobertura,
-        aviso, nota}`. `filas` viene ordenada como corresponde al componente:
-        cronologica en las vistas temporales, de mayor a menor en el resto.
+        La vista lista para pintar: `categorias` y `series` (una por fenomeno si
+        no se agrupa por el), `hallazgos` con los `doc_id` que los sustentan,
+        `complementarias` (vistas de apoyo, como `ViewSpec`), `cobertura` y `aviso`.
+        Se conserva `filas`: cronologica en las vistas temporales, de mayor a
+        menor en el resto.
     """
     from pydantic import ValidationError
 
@@ -180,9 +338,7 @@ def view(spec: dict[str, Any]) -> JSONResponse:
     if not aggregates.disponible():
         return _error("el corpus aun no esta cargado en este despliegue")
 
-    # Una vista temporal agrupa por ano aunque el agente no lo diga: es la unica
-    # granularidad que el corpus sostiene y evita una serie de una sola barra.
-    group_by = vista.group_by or ("anio" if vista.chart == "timeline" else "fenomeno")
+    group_by = dimension_efectiva(vista)
 
     try:
         datos = aggregates.agregar(
@@ -220,6 +376,26 @@ def view(spec: dict[str, Any]) -> JSONResponse:
         )
     aviso = " ".join([*medidos, vista.nota]).strip()
 
+    desde = int(vista.desde) if vista.desde else None
+    hasta = int(vista.hasta) if vista.hasta else None
+    serie_por = serie_efectiva(vista, group_by)
+
+    # Lo que hay detras de una vista es apoyo: si falla, la vista sale igual.
+    try:
+        matriz = aggregates.agregar_series(
+            metrica=vista.metrica,
+            group_by=group_by,  # type: ignore[arg-type]
+            serie_por=serie_por,  # type: ignore[arg-type]
+            fenomenos=list(vista.fenomenos) or None,
+            desde=desde,
+            hasta=hasta,
+            limite=vista.limite,
+        )
+        vistas, hallazgos = apoyo_de_vista(vista, datos["filas"])
+    except Exception as exc:  # noqa: BLE001 - el tablero nunca recibe un 500
+        log.warning("la vista %s salio sin series ni hallazgos: %s", vista.chart, exc)
+        matriz, vistas, hallazgos = None, [vista], []
+
     return JSONResponse(
         content={
             "disponible": True,
@@ -227,11 +403,22 @@ def view(spec: dict[str, Any]) -> JSONResponse:
             "titulo": vista.titulo,
             "metrica": vista.metrica,
             "group_by": group_by,
+            "serie_por": serie_por,
             "fenomenos": list(vista.fenomenos),
+            "categorias": matriz["categorias"] if matriz else [],
+            "series": [
+                {**s, "etiqueta": _etiqueta_serie(serie_por, s["clave"])} for s in matriz["series"]
+            ]
+            if matriz
+            else [],
+            "categorias_omitidas": matriz["categorias_omitidas"] if matriz else 0,
+            "series_omitidas": matriz["series_omitidas"] if matriz else 0,
             "filas": filas,
             "total": datos["total"],
             "cobertura": cobertura,
             "aviso": aviso,
+            "hallazgos": [_hallazgo_json(h) for h in hallazgos],
+            "complementarias": [v.model_dump(exclude_none=True) for v in vistas[1:]],
         }
     )
 
@@ -420,9 +607,7 @@ def progress(sesion: str = "") -> JSONResponse:
     if pasos is None:
         return _error("la traza del turno ya no esta en memoria", pasos=[])
 
-    return JSONResponse(
-        content={"disponible": True, "trace_id": trace_id, "pasos": pasos}
-    )
+    return JSONResponse(content={"disponible": True, "trace_id": trace_id, "pasos": pasos})
 
 
 @router.get("/trace/{trace_id}")

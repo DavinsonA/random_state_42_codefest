@@ -287,6 +287,90 @@ def test_un_turno_degradado_no_se_cachea(live):
     assert segunda["metadata"]["num_interacciones"] == 2, "no es una respuesta del cache"
 
 
+# -- vista de respaldo -------------------------------------------------------
+
+
+class GrafoQueSeQuedaSinVista(FakeGraph):
+    """Deja el estado del fallo real: el visualizador intervino, el analitico conto
+    (`consultar_agregado`) y NO hubo `view_spec` valido."""
+
+    def invoke(self, state, config=None):
+        from src.observability import turnlog
+
+        turnlog.record_agent("agente_analitico")
+        turnlog.record_tool_call(
+            "consultar_agregado",
+            {"metrica": "conteo_documentos", "group_by": "organizacion", "fenomenos": "F3"},
+            "{}",
+        )
+        turnlog.record_agent("agente_visualizador")  # la llamada que devolvio texto y no valido
+        return super().invoke(state, config)
+
+
+def test_si_el_visualizador_no_deja_vista_se_reconstruye_la_pedida(live):
+    client, _ = live(GrafoQueSeQuedaSinVista())
+    body = _chat(client, "Muéstrame en una dona la participación de cada organización").json()
+    assert body["view_spec"]["chart"] == "donut"
+    assert body["view_spec"]["group_by"] == "organizacion"
+    assert body["view_spec"]["fenomenos"] == ["F3"]
+    assert body["view_specs"][0] == body["view_spec"], "la principal va siempre primera"
+    assert body["metadata"]["estado"] == "ok"
+
+
+def test_sin_el_visualizador_una_pregunta_de_texto_no_gana_una_vista(live):
+    client, _ = live(FakeGraph())  # ni visualizador ni conteo
+    body = _chat(client, "que reporta el corpus sobre satelites").json()
+    assert body["view_spec"] is None and body["view_specs"] == []
+
+
+def test_un_fallo_del_respaldo_no_tumba_la_respuesta(live, monkeypatch):
+    from src.agents import vista_respaldo
+
+    def explota(*_a, **_k):
+        raise RuntimeError("bug en el respaldo")
+
+    monkeypatch.setattr(vista_respaldo, "desde_turno", explota)
+    client, _ = live(GrafoQueSeQuedaSinVista())
+    resp = _chat(client, "Grafica por organización")
+    assert resp.status_code == 200
+    assert resp.json()["view_spec"] is None and resp.json()["metadata"]["estado"] == "ok"
+
+
+# -- hallazgos_detalle: cada frase del tablero, rastreable ---------------------
+
+
+class GrafoConVista(FakeGraph):
+    def invoke(self, state, config=None):
+        resultado = super().invoke(state, config)
+        resultado["view_spec"] = {"chart": "donut", "group_by": "organizacion", "fenomenos": ["F3"]}
+        return resultado
+
+
+def test_los_hallazgos_llegan_tambien_con_soporte_y_doc_ids(live, monkeypatch):
+    from src.retrieval import aggregates
+
+    tabla = [
+        {"doc_id": f"F3-{o}-{i}", "fenomeno": "F3", "organizacion": o, "formato": "pdf",
+         "anio": None, "n_fragmentos": 1}
+        for o, n in (("Alertas", 6), ("SIPRI", 4), ("A", 1), ("B", 1), ("C", 1))
+        for i in range(n)
+    ]  # fmt: skip
+    monkeypatch.setattr(aggregates, "tabla", lambda: tabla)
+    client, _ = live(GrafoConVista())
+    body = _chat(client, "muestra la dona por organizacion").json()
+    assert body["hallazgos"], "un reparto concentrado tiene algo que decir"
+    detalle = body["hallazgos_detalle"]
+    assert [d["texto"] for d in detalle] == body["hallazgos"], "mismo orden, mismo texto"
+    assert all(d["soporte"] and d["doc_ids"] for d in detalle)
+    assert all(doc.startswith("F3-") for d in detalle for doc in d["doc_ids"])
+
+
+def test_sin_vista_no_hay_hallazgos_ni_detalle(live):
+    client, _ = live(FakeGraph())
+    body = _chat(client, "que reporta el corpus").json()
+    assert body["hallazgos"] == [] and body["hallazgos_detalle"] == []
+
+
 # -- agentes_invocados incluye a los que no gastan tokens -------------------
 
 
@@ -305,3 +389,14 @@ def test_agentes_invocados_incluye_a_los_que_no_gastan_tokens(live):
     assert "agente_qa" in meta["agentes_invocados"]  # gasto tokens
     assert "agente_analitico" in meta["agentes_invocados"]  # no gasto ninguno
     assert [a["agente"] for a in meta["tokens_por_agente"]] == ["agente_qa"]
+
+
+def test_el_tope_de_la_pregunta_llega_a_la_vista_que_emitio_el_visualizador(live):
+    client, _ = live(GrafoConVista())
+    body = _chat(client, "las 3 organizaciones que mas publican en barras").json()
+    assert body["view_spec"]["limite"] == 3
+
+
+def test_sin_tope_en_la_pregunta_la_vista_no_se_recorta(live):
+    client, _ = live(GrafoConVista())
+    assert _chat(client, "las organizaciones que mas publican").json()["view_spec"]["limite"] is None

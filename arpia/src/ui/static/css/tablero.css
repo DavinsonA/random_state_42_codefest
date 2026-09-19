@@ -383,11 +383,13 @@
 .pagina-tablero .lienzo {
     position: relative;
     height: 250px;
+    /* el canvas nunca se sale de su caja ni tapa lo que va debajo (botones) */
+    overflow: hidden;
 }
 
 /* -- mapa -- */
 
-.pagina-tablero #mapa {
+.pagina-tablero .mapa {
     height: 250px;
     border-radius: 10px;
     overflow: hidden;
@@ -511,150 +513,361 @@
 
 
 /* =========================
-   PANTALLA COMPLETA DE PANELES
-   ========================= */
+   DISTRIBUCION SEGUN CANTIDAD DE GRAFICOS
+   =========================
+ * dashboard.js marca los paneles: `.ancho` ocupa las dos columnas y `.alto`
+ * (grafico unico) gana altura. 1 -> uno grande; 2 y 4 -> dos columnas;
+ * 3 o impar -> el primero a lo ancho y el resto en pares debajo.
+ */
 
-.pagina-tablero .grafico {
-    position: relative;
+.pagina-tablero .grafico.ancho {
+    grid-column: 1 / -1;
 }
 
-.boton-pantalla-completa {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    z-index: 20;
+.pagina-tablero .grafico.alto .lienzo,
+.pagina-tablero .grafico.alto .mapa,
+.pagina-tablero .grafico.alto .relaciones,
+.pagina-tablero .grafico.alto .tabla-caja {
+    height: 520px;
+    max-height: none;
+}
 
-    width: 32px;
-    height: 32px;
+.grafico-cuerpo {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
 
+.grafico-acciones {
     display: flex;
     align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.grafico-vacio {
+    padding: 48px 12px;
+    color: var(--t-texto-suave);
+    font-size: 12px;
+    text-align: center;
+}
+
+/* -- boton "Ampliar" -- */
+
+.boton-icono {
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
-
+    width: 28px;
+    height: 28px;
     padding: 0;
-
-    background: rgba(8, 14, 28, 0.85);
-    border: 1px solid var(--arpia-border);
+    background: color-mix(in srgb, var(--arpia-void) 45%, transparent);
+    border: 1px solid var(--t-borde);
     border-radius: 7px;
-
-    color: var(--arpia-text);
-    font-size: 18px;
+    color: var(--arpia-text-secondary);
+    font: inherit;
+    font-size: 14px;
     cursor: pointer;
-
-    transition: 0.2s ease;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
-.boton-pantalla-completa:hover {
+.boton-icono:hover {
     background: var(--arpia-space);
-    border-color: var(--arpia-text);
+    border-color: var(--arpia-space);
+    color: var(--arpia-bg);
 }
 
-.pagina-tablero .grafico:fullscreen {
-    width: 100vw;
-    height: 100vh;
-    margin: 0;
-    padding: 24px;
+.boton-icono svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
 
-    border-radius: 0;
-    background: var(--arpia-void);
+/* -- tabla -- */
 
+.tabla-caja {
+    height: 250px;
+    overflow: auto;
+    border-radius: 10px;
+}
+
+.tabla-datos {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.tabla-datos th,
+.tabla-datos td {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--t-borde);
+    text-align: left;
+}
+
+.tabla-datos th {
+    position: sticky;
+    top: 0;
+    background: var(--arpia-surface);
+    color: var(--arpia-text-muted);
+    font-weight: 600;
+}
+
+.tabla-datos .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.tabla-datos tbody tr {
+    cursor: pointer;
+}
+
+.tabla-datos tbody tr:hover,
+.tabla-datos tbody tr:focus-visible {
+    background: color-mix(in srgb, var(--arpia-space) 8%, transparent);
+}
+
+.chip-fenomeno {
+    padding: 0 6px;
+    border-left: 3px solid var(--color-fenomeno);
+}
+
+/* -- indicador -- */
+
+.kpi {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    min-height: 250px;
+    padding: 12px 8px;
+}
+
+.kpi-cifra {
+    color: var(--arpia-text);
+    font-size: 48px;
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.kpi-etiqueta {
+    color: var(--t-texto-suave);
+    font-size: 13px;
+}
+
+.kpi-desglose {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 16px;
+    padding: 0;
+    list-style: none;
+}
+
+.kpi-parte {
+    display: flex;
+    gap: 10px;
+    padding: 6px 12px;
+    background: color-mix(in srgb, var(--arpia-void) 35%, transparent);
+    border-left: 3px solid var(--color-fenomeno);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+/* =========================
+   VISTA AMPLIADA (<dialog>)
+   ========================= */
+
+.ampliado {
+    width: min(1280px, calc(100vw - 48px));
+    height: min(820px, calc(100vh - 48px));
+    max-width: none;
+    max-height: none;
+    padding: 20px 24px 24px;
+    background: linear-gradient(145deg, var(--arpia-elevated), var(--arpia-surface));
+    border: 1px solid var(--t-borde-hover);
+    border-radius: 16px;
+    box-shadow: 0 30px 80px color-mix(in srgb, var(--arpia-void) 70%, transparent);
+    color: var(--arpia-text);
+}
+
+.ampliado[open] {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.ampliado::backdrop {
+    background: color-mix(in srgb, var(--arpia-void) 72%, transparent);
+    backdrop-filter: blur(3px);
+}
+
+.ampliado-cabeza {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.ampliado-cabeza h2 {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.ampliado-cuerpo {
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
 }
 
-.pagina-tablero .grafico:fullscreen canvas {
-    flex: 1;
-    min-height: 0;
-}
-
-.pagina-tablero .grafico:fullscreen #mapa {
-    flex: 1;
-    height: auto;
-    min-height: 0;
-}
-
-.pagina-tablero .grafico:fullscreen .relaciones {
+/* en la vista ampliada, el grafico ocupa todo el alto disponible */
+.ampliado-cuerpo .lienzo,
+.ampliado-cuerpo .mapa,
+.ampliado-cuerpo .relaciones,
+.ampliado-cuerpo .tabla-caja,
+.ampliado-cuerpo .kpi {
     flex: 1;
     height: auto;
     min-height: 0;
 }
 
-/* =========================
-   BOTÓN PANTALLA COMPLETA
-   ========================= */
+.ampliado-cuerpo .mapa {
+    border-radius: 10px;
+    overflow: hidden;
+}
 
-.pagina-tablero .grafico {
+.ampliado-cuerpo .relaciones {
     position: relative;
 }
 
-.boton-fullscreen {
+.ampliado-cuerpo .nodo {
     position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 100;
-
-    width: 32px;
-    height: 32px;
-
-    padding: 0;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    border: 1px solid var(--t-borde);
-    border-radius: 7px;
-
-    background: rgba(5, 10, 20, 0.85);
-    color: var(--arpia-text);
-
-    font-size: 18px;
-    cursor: pointer;
+    padding: 12px 20px;
+    background: var(--arpia-space);
+    border-radius: 999px;
+    color: var(--arpia-bg);
+    font-size: 15px;
+    font-weight: 700;
 }
 
-.boton-fullscreen:hover {
+.ampliado-cuerpo .centro { left: 50%; top: 45%; transform: translate(-50%, -50%); }
+.ampliado-cuerpo .arriba { left: 12%; top: 14%; }
+.ampliado-cuerpo .abajo { right: 12%; bottom: 14%; }
+
+.ampliado-cuerpo .kpi-cifra {
+    font-size: 96px;
+}
+
+
+/* -- hallazgos del compositor ----------------------------------------------
+ *
+ * Lo que las cifras de la vista dicen, calculado sin modelo. Se separan
+ * visualmente de la respuesta del agente a proposito: una es lo que afirma el
+ * corpus y otra es aritmetica sobre la agregacion, y mezclarlas haria que el
+ * analista no supiera cual esta leyendo.
+ *
+ * Sin colores propios: solo tokens existentes.
+ */
+
+.pagina-tablero .hallazgos-titulo {
+    margin: 12px 0 4px;
+    color: var(--arpia-text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.pagina-tablero .hallazgos {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0 0 0 16px;
+    list-style: disc;
+}
+
+.pagina-tablero .hallazgos li {
+    color: var(--arpia-text);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* =========================
+   SELECTOR DE TIPO DE LA SERIE TEMPORAL
+   =========================
+ * Debajo de "Evolucion temporal": Linea / Columnas / Barras. Mismo lenguaje
+ * que el selector de idioma: el activo gana fondo y borde, no solo color.
+ */
+
+.selector-grafico {
+    position: relative;
+    z-index: 2;  /* siempre por encima del grafico, tambien en pantalla completa */
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    margin-top: 10px;
+}
+
+.tipo-grafico {
+    min-height: 26px;
+    padding: 0 12px;
+    background: color-mix(in srgb, var(--arpia-void) 35%, transparent);
+    border: 1px solid var(--t-borde);
+    border-radius: 999px;
+    color: var(--arpia-text-secondary);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.tipo-grafico:hover {
+    border-color: var(--t-borde-hover);
+    color: var(--arpia-text);
+}
+
+.tipo-grafico[aria-pressed="true"] {
     background: var(--arpia-space);
+    border-color: var(--arpia-space);
     color: var(--arpia-bg);
 }
 
-/* CUADRO EN PANTALLA COMPLETA */
-
-.pagina-tablero .grafico.en-pantalla-completa {
-    position: fixed !important;
-    inset: 0 !important;
-
-    width: 100vw !important;
-    height: 100vh !important;
-
-    margin: 0 !important;
-    padding: 25px !important;
-
-    z-index: 99999 !important;
-
-    border-radius: 0 !important;
-
-    background: var(--arpia-void) !important;
-
-    transform: none !important;
+/* en la vista ampliada el selector queda al pie, sin encoger el grafico */
+.ampliado-cuerpo .selector-grafico {
+    flex-shrink: 0;
 }
 
-/* El gráfico ocupa todo el espacio disponible */
+/* =========================
+   ENTRADA DE PANELES
+   =========================
+ * dashboard.js pone `.entrando` al terminar la carga y al cambiar las vistas;
+ * `--orden` escalona los paneles 70 ms entre si. Se quita al acabar para no
+ * pisar el `transform` del hover.
+ */
 
-.pagina-tablero .grafico.en-pantalla-completa .lienzo {
-    height: calc(100vh - 130px) !important;
+.pagina-tablero .grafico.entrando {
+    animation: panel-entrada 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    animation-delay: calc(var(--orden, 0) * 70ms);
 }
 
-.pagina-tablero .grafico.en-pantalla-completa #mapa {
-    height: calc(100vh - 130px) !important;
+@keyframes panel-entrada {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.985);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
 }
 
-.pagina-tablero .grafico.en-pantalla-completa .relaciones {
-    height: calc(100vh - 130px) !important;
-}
-
-/* canvas de Chart.js */
-
-.pagina-tablero .grafico.en-pantalla-completa canvas {
-    width: 100% !important;
-    height: 100% !important;
+@media (prefers-reduced-motion: reduce) {
+    .pagina-tablero .grafico.entrando { animation: none; }
 }

@@ -36,6 +36,7 @@ from src.api.contracts import (
     ChatRequest,
     Citation,
     Evaluacion,
+    HallazgoDetalle,
     Metadata,
     Tokens,
     TokensPorAgente,
@@ -111,6 +112,8 @@ def _build(
     *,
     agentes_extra: tuple[str, ...] = (),
     view_spec: ViewSpec | None = None,
+    view_specs: list[ViewSpec] | None = None,
+    hallazgos: list[Any] | None = None,
 ) -> AgentResponse:
     """Arma el JSON de ADL con lo que el turno realmente registro.
 
@@ -153,6 +156,12 @@ def _build(
         mode=get_settings().arpia_mode,  # type: ignore[arg-type]
         citations=[Citation(**c) for c in turnlog.citations()],
         view_spec=view_spec,
+        view_specs=view_specs or ([view_spec] if view_spec else []),
+        hallazgos=[h.texto for h in hallazgos or []],
+        hallazgos_detalle=[
+            HallazgoDetalle(texto=h.texto, soporte=list(h.soporte), doc_ids=list(h.doc_ids))
+            for h in hallazgos or []
+        ],
         trace_id=tracing.current_trace_id() or "",
     )
 
@@ -171,6 +180,75 @@ def _leer_view_spec(crudo: Any) -> ViewSpec | None:
     except ValidationError as exc:
         log.warning("el grafo emitio un view_spec invalido, se descarta: %s", exc.errors()[:2])
         return None
+
+
+def _con_tope(vista: ViewSpec | None, texto: str) -> ViewSpec | None:
+    """Aplica el tope que pide la pregunta ("las 5 organizaciones") a la vista del visualizador.
+
+    El modelo no ve el campo `limite` (medido: cada campo visible mueve sus decisiones), asi que
+    el tope lo pone el codigo que lee la pregunta. No aplica a una cifra ni a una serie temporal.
+    """
+    if vista is None or vista.limite or vista.chart in ("kpi", "timeline") or vista.group_by == "anio":
+        return vista
+    try:
+        from src.agents.vista_respaldo import limite_de_pregunta
+
+        n = limite_de_pregunta(texto)
+    except Exception as exc:  # noqa: BLE001 - frontera: el tope es un detalle, nunca tumba el turno
+        log.warning("no se pudo leer el tope de la pregunta: %s", exc)
+        return vista
+    return vista.model_copy(update={"limite": n}) if n else vista
+
+
+def _vista_de_respaldo(texto: str, estado: str) -> ViewSpec | None:
+    """La vista que el usuario pidio cuando el visualizador no dejo una valida. CERO tokens.
+
+    Vive en el lado API por la misma razon que `_componer_tablero`: lee la traza
+    del turno (`turnlog`), que es lo unico que sabe que se contó y que agente
+    intervino. **Nunca lanza**: un respaldo que falla deja el turno como estaba.
+    """
+    if estado != "ok":
+        return None
+    try:
+        from src.agents import vista_respaldo
+
+        vista = vista_respaldo.desde_turno(texto, turnlog.agentes(), turnlog.tool_calls())
+    except Exception as exc:  # noqa: BLE001 - frontera: el respaldo nunca tumba el turno
+        log.warning("la vista de respaldo fallo (%s); el turno sigue sin vista", exc)
+        return None
+    if vista is not None:
+        log.info(
+            "el visualizador no dejo una vista valida; se usa la de respaldo (%s por %s)",
+            vista.chart,
+            vista.group_by,
+        )
+    return vista
+
+
+def _componer_tablero(vista: ViewSpec | None) -> tuple[list[ViewSpec], list[Any]]:
+    """Vistas de apoyo y hallazgos de la vista que emitio el agente. CERO tokens.
+
+    Es el agente compositor, y vive en el lado API a proposito: necesita los
+    datos YA agregados de la vista —que el grafo no carga, porque decidir una
+    vista y poblarla son cosas distintas— y esos salen de `dashboard.py`, que
+    es quien sabe traducir un `ViewSpec` a filas.
+
+    **Nunca lanza.** Un fallo al proponer una vista de apoyo no puede tumbar la
+    respuesta que el usuario esta esperando: se devuelve la vista principal sola
+    y el turno sigue. El apoyo es apoyo.
+    """
+    if vista is None:
+        return [], []
+    try:
+        from src.agents import compositor
+        from src.api.dashboard import apoyo_de_vista, filas_de_vista
+
+        vistas, hallazgos = apoyo_de_vista(vista, filas_de_vista(vista))
+        turnlog.record_agent(compositor.AGENTE)
+        return vistas, hallazgos
+    except Exception as exc:  # noqa: BLE001 - frontera: el apoyo nunca tumba el turno
+        log.warning("el compositor fallo (%s); se devuelve solo la vista principal", exc)
+        return [vista], []
 
 
 def _retrieval_fallback(texto: str) -> str:
@@ -288,7 +366,20 @@ def _turno(texto: str, session_id: str) -> AgentResponse:
             agentes_extra=(guardian.AGENTE,),
         )
 
-    construida = _build(texto, respuesta, estado, start, view_spec=view_spec)
+    if view_spec is None and not s.is_stub:
+        view_spec = _vista_de_respaldo(texto, estado)
+    view_spec = _con_tope(view_spec, texto)
+
+    vistas, hallazgos = _componer_tablero(view_spec)
+    construida = _build(
+        texto,
+        respuesta,
+        estado,
+        start,
+        view_spec=view_spec,
+        view_specs=vistas,
+        hallazgos=hallazgos,
+    )
 
     # 5. Memoria: se guarda lo que costo producir. No se cachea un error ni un
     #    rechazo: repetirlos sale gratis y cachearlos congelaria un fallo

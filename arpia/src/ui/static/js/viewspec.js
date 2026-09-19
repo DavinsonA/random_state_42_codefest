@@ -3,37 +3,29 @@
 // El ViewSpec es un esquema cerrado: aqui solo se acepta el mismo vocabulario.
 // Lo que no se reconozca se descarta, nunca se interpreta.
 
-import { ApiError, obtenerAgregado } from "./api.js";
+import { ApiError, obtenerVista } from "./api.js";
+import { mensajeError, t } from "./i18n.js";
 
-export const FENOMENOS = {
-    F1: "IA y Capacidades Estratégicas",
-    F2: "Seguridad del Entorno Espacial",
-    F3: "Dinámicas Territoriales",
-};
+/** Objeto cuyos valores se leen del idioma activo en cada acceso (getters). */
+function traducible(prefijo, claves) {
+    const obj = {};
+    for (const k of claves) Object.defineProperty(obj, k, { get: () => t(`${prefijo}.${k}`), enumerable: true });
+    return Object.freeze(obj);
+}
+
+export const FENOMENOS = traducible("fenomeno", ["F1", "F2", "F3"]);
 
 export const CHARTS = ["timeline", "bar", "stacked_bar", "donut", "table", "kpi"];
 export const GROUP_BY = ["fenomeno", "organizacion", "fuente", "formato", "anio"];
 export const METRICAS = ["conteo_documentos", "conteo_fragmentos"];
 const FENS = ["F1", "F2", "F3"];
+const CHARTS_CON_SERIES = ["bar", "stacked_bar", "timeline"];
 
-export const NOMBRE_CHART = {
-    timeline: "Serie anual",
-    bar: "Barras",
-    stacked_bar: "Barras apiladas por fenómeno",
-    donut: "Composición por fenómeno",
-    table: "Tabla",
-    kpi: "Indicador",
-};
+export const NOMBRE_CHART = traducible("chart", ["timeline", "bar", "stacked_bar", "donut", "table", "kpi"]);
 
-export const NOMBRE_GROUP_BY = {
-    fenomeno: "fenómeno",
-    organizacion: "organización",
-    fuente: "fuente",
-    formato: "formato",
-    anio: "año",
-};
+export const NOMBRE_GROUP_BY = traducible("grupo", ["fenomeno", "organizacion", "fuente", "formato", "anio"]);
 
-const NOMBRE_METRICA = { conteo_documentos: "documentos", conteo_fragmentos: "fragmentos" };
+const NOMBRE_METRICA = traducible("metrica", ["conteo_documentos", "conteo_fragmentos"]);
 
 /** Vista con la que abre el tablero si no llega ninguna. */
 export const VISTA_INICIAL = {
@@ -43,7 +35,7 @@ export const VISTA_INICIAL = {
     desde: null,
     hasta: null,
     group_by: "fenomeno",
-    titulo: "Documentos por fenómeno",
+    titulo: "",  // vacio: el titulo por defecto sale traducido (tituloPorDefecto)
     nota: "",
 };
 
@@ -55,9 +47,15 @@ export function normalizar(vs) {
     let groupBy = GROUP_BY.includes(vs.group_by) ? vs.group_by : null;
     // Cada componente necesita una dimension concreta para tener sentido.
     if (vs.chart === "timeline") groupBy = "anio";
-    if (vs.chart === "donut") groupBy = "fenomeno";
+    // Una dona reparte un todo entre categorias: vale por cualquier dimension menos el ano
+    // (una dona de anios no dice nada; para eso esta la linea de tiempo).
+    if (vs.chart === "donut" && (!groupBy || groupBy === "anio")) groupBy = "fenomeno";
     if (vs.chart === "stacked_bar" && (!groupBy || groupBy === "fenomeno")) groupBy = "organizacion";
     if ((vs.chart === "bar" || vs.chart === "table") && !groupBy) groupBy = "fenomeno";
+    // Segunda dimension (una serie por cada valor). El servidor la valida igual; aqui solo se
+    // descarta lo que no se puede pintar: distinta del eje y en un grafico que separe series.
+    const eje = vs.chart === "timeline" ? "anio" : groupBy;
+    const serie = GROUP_BY.includes(vs.serie_por) && vs.serie_por !== eje && CHARTS_CON_SERIES.includes(vs.chart) ? vs.serie_por : null;
     return {
         chart: vs.chart,
         metrica: METRICAS.includes(vs.metrica) ? vs.metrica : "conteo_documentos",
@@ -65,6 +63,8 @@ export function normalizar(vs) {
         desde: anio(vs.desde),
         hasta: anio(vs.hasta),
         group_by: vs.chart === "kpi" ? null : groupBy,
+        serie_por: serie,
+        limite: Number.isInteger(vs.limite) && vs.limite >= 1 && vs.limite <= 25 ? vs.limite : null,
         titulo: typeof vs.titulo === "string" ? vs.titulo : "",
         nota: typeof vs.nota === "string" ? vs.nota : "",
     };
@@ -81,10 +81,39 @@ export function vistaDesdeHash() {
     }
 }
 
+/** Tope de graficos por respuesta: mas de esto deja de ser legible. */
+export const MAX_VISTAS = 6;
+
+/**
+ * Vistas que trae una respuesta de /chat, ya normalizadas.
+ *
+ * El contrato actual (src/api/contracts.py) solo tiene `view_spec` (una).
+ * Se acepta tambien `view_specs` (lista) para cuando el backend lo exponga:
+ * el tablero ya sabe repartir N graficos. Lo invalido se descarta.
+ */
+export function vistasDeRespuesta(datos) {
+    const crudas = Array.isArray(datos?.view_specs) && datos.view_specs.length
+        ? datos.view_specs
+        : [datos?.view_spec];
+    return crudas.map(normalizar).filter(Boolean).slice(0, MAX_VISTAS);
+}
+
+/** `#vistas=[...]` o `#vista={...}` en la URL (enlace desde el chat, pruebas). */
+export function vistasDesdeHash() {
+    const m = window.location.hash.match(/vistas?=([^&]+)/);
+    if (!m) return [];
+    try {
+        const valor = JSON.parse(decodeURIComponent(m[1]));
+        return (Array.isArray(valor) ? valor : [valor]).map(normalizar).filter(Boolean).slice(0, MAX_VISTAS);
+    } catch {
+        return [];
+    }
+}
+
 export function tituloPorDefecto(spec) {
-    const met = NOMBRE_METRICA[spec.metrica] || spec.metrica;
-    if (spec.chart === "kpi") return `Total de ${met}`;
-    return `${met[0].toUpperCase()}${met.slice(1)} por ${NOMBRE_GROUP_BY[spec.group_by] || "grupo"}`;
+    const metrica = NOMBRE_METRICA[spec.metrica] || spec.metrica;
+    if (spec.chart === "kpi") return t("titulo.total", { metrica });
+    return t("titulo.por", { metrica, grupo: NOMBRE_GROUP_BY[spec.group_by] || t("grupo.generico") });
 }
 
 // -- datos -------------------------------------------------------------------
@@ -118,7 +147,7 @@ function datosSimulados(spec) {
         filas,
         total: filas.reduce((s, f) => s + f.valor, 0),
         cobertura: spec.group_by === "anio" ? { con_dato: 622, total: 1826 } : null,
-        nota: "Datos simulados (modo stub): no provienen del corpus.",
+        nota: t("nota.simulado"),
         simulado: true,
     };
 }
@@ -131,88 +160,66 @@ export const VISTA_TIEMPO_INICIAL = {
     desde: null,
     hasta: null,
     group_by: "anio",
-    titulo: "Documentos por año",
+    titulo: "",  // vacio: el titulo por defecto sale traducido (tituloPorDefecto)
     nota: "",
 };
 
 /** Traduce los motivos de `disponible: false` a un mensaje para el analista. */
 export function mensajeIndice(motivo) {
     const m = String(motivo || "");
-    if (m.startsWith("indice no disponible")) {
-        return "El índice del corpus todavía no está disponible. La vista se mostrará en cuanto lo esté.";
-    }
-    return m ? `No hay datos disponibles: ${m}.` : "No se pudieron cargar los datos de la vista.";
-}
-
-/** Une las coberturas de varias peticiones (una por fenomeno) en una sola.
- *
- * `con_dato` son los documentos que SI declaran la dimension y `total` los que
- * la podian declarar. Solo tiene sentido para el ano: en las demas dimensiones
- * todos los documentos tienen dato y mostrar "100 % tienen año" seria falso.
- */
-function unirCobertura(respuestas, dimension) {
-    if (dimension !== "anio") return null;
-    let total = 0;
-    let conDato = 0;
-    for (const r of respuestas) {
-        const c = r.cobertura;
-        if (!c) continue;
-        total += Number(c.documentos_en_dimension) || 0;
-        conDato += (Number(c.documentos_en_dimension) || 0) - (Number(c.sin_dato_en_la_dimension) || 0);
-    }
-    return total ? { con_dato: conDato, total } : null;
+    if (m.startsWith("indice no disponible")) return t("error.indice");
+    return m ? t("error.sinDatosMotivo", { motivo: m }) : t("error.datos");
 }
 
 /**
  * Carga los datos de una vista.
  * Devuelve { datos } o { error } con un mensaje legible; nunca lanza.
  *
- * El backend responde `{ clave, valor, doc_ids }` sin fenomeno. Los graficos
- * apilan y colorean por fenomeno, asi que, salvo cuando la dimension ES el
- * fenomeno, se pide una vez por fenomeno y cada fila lo hereda de su peticion.
+ * Una sola llamada a `POST /api/view`: el servidor resuelve el `ViewSpec` (mismo esquema cerrado
+ * que el visualizador), cruza las dimensiones y devuelve categorias x series con su cobertura.
+ * Antes la GUI pedia `/api/aggregate` una vez por fenomeno y armaba las series por su cuenta:
+ * una copia del criterio del servidor en otro lenguaje. Cada fila lleva su `serie`; `fenomeno`
+ * solo cuando la categoria o la serie ES un fenomeno.
  */
 export async function cargar(spec, { modoStub = false } = {}) {
     try {
-        const dimension = spec.group_by || "fenomeno";
-        const fenomenos = spec.fenomenos.length ? spec.fenomenos : FENS;
-        const peticiones =
-            dimension === "fenomeno"
-                ? [obtenerAgregado({ ...spec, group_by: "fenomeno" })]
-                : fenomenos.map((f) => obtenerAgregado({ ...spec, group_by: dimension, fenomenos: [f] }));
-
-        const respuestas = await Promise.all(peticiones);
-        const caida = respuestas.find((r) => r.disponible === false);
-        if (caida) {
-            if (modoStub) return { datos: datosSimulados(spec) };
-            return { error: mensajeIndice(caida.motivo) };
+        const r = await obtenerVista(spec);
+        if (r.disponible === false) {
+            if (modoStub) return { datos: datosSimulados({ ...spec, serie_por: null }) };
+            return { error: mensajeIndice(r.motivo) };
         }
+        const porFenomeno = r.group_by === "fenomeno";
+        const filas = (r.series || []).flatMap((s) =>
+            (r.categorias || []).map((c, i) => ({
+                grupo: String(c),
+                serie: String(s.clave),
+                fenomeno: porFenomeno ? (FENS.includes(c) ? c : null) : r.serie_por === "fenomeno" && FENS.includes(s.clave) ? s.clave : null,
+                valor: Number(s.valores?.[i]) || 0,
+                doc_ids: Array.isArray(s.doc_ids?.[i]) ? s.doc_ids[i].map(String) : [],
+            })),
+        ).filter((f) => f.valor > 0);
 
-        const filas = respuestas.flatMap((r, i) =>
-            (r.filas || []).map((f) => {
-                const clave = f.clave === null || f.clave === undefined ? "" : String(f.clave);
-                return {
-                    grupo: clave,
-                    fenomeno: dimension === "fenomeno" ? (FENS.includes(clave) ? clave : null) : fenomenos[i],
-                    valor: Number(f.valor) || 0,
-                    doc_ids: Array.isArray(f.doc_ids) ? f.doc_ids.map(String) : [],
-                };
-            }),
-        );
+        // `con_dato` son los documentos que SI declaran la dimension y `total` los que la podian
+        // declarar. Solo tiene sentido para el ano: en las demas todos tienen dato y mostrar
+        // "100 % tienen ano" seria falso. Ese caso ya lo dice la cobertura, no el aviso.
+        const temporal = r.group_by === "anio";
+        const enDimension = Number(r.cobertura?.documentos_en_dimension) || 0;
+        const sinDato = Number(r.cobertura?.sin_dato_en_la_dimension) || 0;
         return {
             datos: {
                 filas,
-                total: filas.reduce((s, f) => s + f.valor, 0),
-                cobertura: unirCobertura(respuestas, dimension),
-                nota: "",
+                total: Number(r.total) || 0,
+                cobertura: temporal && enDimension ? { con_dato: enDimension - sinDato, total: enDimension } : null,
+                // El aviso del servidor ya incluye la nota de la vista: no se dice dos veces.
+                nota: temporal ? "" : (r.aviso || "").replace(spec.nota || "\0", "").trim(),
                 simulado: false,
             },
         };
     } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
-            if (modoStub) return { datos: datosSimulados(spec) };
-            return { error: "El servicio no expone los datos del tablero (/api/aggregate)." };
+            if (modoStub) return { datos: datosSimulados({ ...spec, serie_por: null }) };
+            return { error: t("error.sin_datos_tablero") };
         }
-        return { error: err.message || "No se pudieron cargar los datos de la vista." };
+        return { error: err instanceof ApiError ? mensajeError(err) : t("error.datos") };
     }
 }
-

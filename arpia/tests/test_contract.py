@@ -114,7 +114,17 @@ def test_response_tiene_los_tres_bloques_de_adl_y_los_campos_propios():
     )
     body = resp.model_dump()
     assert body.keys() >= BLOQUES_ADL
-    assert body.keys() - BLOQUES_ADL == {"mode", "citations", "view_spec", "trace_id"}
+    # ADL exige los tres bloques y no prohibe mas. Esta lista es cerrada a
+    # proposito: un campo nuevo en la respuesta publica debe pasar por aqui.
+    assert body.keys() - BLOQUES_ADL == {
+        "mode",
+        "citations",
+        "view_spec",
+        "view_specs",
+        "hallazgos",
+        "hallazgos_detalle",
+        "trace_id",
+    }
     assert body["evaluacion"].keys() == {
         "input",
         "actual_output",

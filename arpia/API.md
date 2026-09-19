@@ -55,6 +55,7 @@ que ninguna prueba con modelo falso podía ver (§12 #22 y #23). **El tablero we
 | `GET /` | Sirve `chat.html` o `dashboard.html` según el `Host` (`src/ui/static/`) | Navegador |
 | `GET /api/components` | Catálogo de componentes y valores reales de cada dimensión | Tablero, agente visualizador |
 | `GET /api/aggregate` | Conteos agregados con los `doc_id` que los sustentan | Tablero |
+| `GET /api/documentos` | Los documentos detrás de una cifra: lista paginada y filtrable | Tablero |
 | `GET /api/timeline` | Serie anual de documentos, con su cobertura | Tablero |
 | `GET /api/geo` | **Siempre `disponible: false`**: el corpus no tiene lugar | Tablero |
 | `GET /api/evidence/{chunk_id}` | El fragmento exacto detrás de una cita | Tablero, chat |
@@ -176,6 +177,11 @@ prohíbe que haya más).
   "citations": [ { "doc_id": "…", "chunk_id": "…", "fuente": "…", "fragmento": "…",
                    "formato": "pdf", "posicion": 12, "total_fragmentos": 87, "anio": 2019 } ],
   "view_spec": null,                     // ViewSpec (§4) solo si el turno pide una vista
+  "view_specs": [],                      // la pedida (siempre primera) + hasta 2 de apoyo
+  "hallazgos": [],                       // frases que las cifras de la vista ya dicen (0 tokens)
+  "hallazgos_detalle": [                 // los mismos, en el mismo orden, rastreables
+    { "texto": "…", "soporte": ["Alertas_Tempranas", "SIPRI"], "doc_ids": ["F3-ALERTAS-001"] }
+  ],
   "trace_id": "…"                        // correlaciona con GET /api/trace/{trace_id}
 }
 ```
@@ -192,7 +198,8 @@ Nada se fabrica: todo sale de lo que el turno **realmente registró**.
 | `tools_called` | `@registry.register`, o `turnlog.record_tool_call` a mano | ver hallazgo §12 #4: el documental hoy **no** anota `buscar_corpus` |
 | `tokens`, `tokens_por_agente`, `num_interacciones` | orquestador, `redactar`, visualizador | `usage.record_usage(..., agent=, model=)` en cada llamada al LLM |
 | `latencia_ms`, `estado`, `mode` | API | medidos en `chat.py` |
-| `view_spec` | agente visualizador | `ViewSpec` validado; uno inválido se descarta (`_leer_view_spec`) |
+| `view_spec` | agente visualizador | `ViewSpec` validado; uno inválido se descarta (`_leer_view_spec`). Si el visualizador intervino y no dejó una válida, `vista_respaldo` la reconstruye sin modelo desde los parámetros del conteo del analista |
+| `view_specs`, `hallazgos`, `hallazgos_detalle` | compositor (0 tokens) | `dashboard.apoyo_de_vista`: el mismo camino que `POST /api/view`. `hallazgos` es solo el texto, `hallazgos_detalle` añade `soporte` y `doc_ids` para llegar a la fuente |
 
 Regla del validador de `Metadata`: si hay `tokens_por_agente`, `tokens` se **recalcula**
 como su suma. ADL marca como inconsistencia reportar en `tokens.total` menos de lo que
@@ -244,7 +251,15 @@ no se puede emitir.
 | `fenomenos` | subconjunto de `F1`, `F2`, `F3` (vacío = los tres) |
 | `group_by` | `fenomeno`, `organizacion`, `fuente`, `formato`, `anio` |
 | `desde` / `hasta` | año `YYYY` inclusive |
+| `serie_por` | como `group_by`; segunda dimensión que separa las series (solo `bar`, `stacked_bar`, `timeline`). **No está en el esquema que ve el modelo** (ver abajo) |
 | `titulo`, `nota` | texto; `nota` es la advertencia que el tablero **debe** mostrar |
+
+**`serie_por` existe pero el visualizador no lo ve.** Sirve al tablero (`POST /api/view`, enlaces `#vista=`)
+y al compositor. Se oculta del esquema JSON del modelo (`SkipJsonSchema`) porque, medido con `gpt-oss-20b`,
+con el campo visible la misma dona de F3 salía con **F1** en 4 de 4 corridas: un dato mal filtrado, peor que un
+cruce que falta. Un `serie_por` inválido (igual al eje, o en un gráfico que no separa series) se **quita** en
+lugar de invalidar la vista; fuera del vocabulario sigue siendo un error. Exponerlo al modelo se decide
+midiendo (hay una prueba que fija el esquema).
 
 **El vocabulario está podado a propósito.** El índice trae ocho campos (`doc_id`,
 `chunk_id`, `fuente`, `formato`, `fenomeno`, `posicion`, `num_tokens`, `texto`) y **ni
@@ -772,14 +787,66 @@ Todos devuelven **HTTP 200**. Un fallo o un dato inexistente llega como
 | `GET /api/components` | — | catálogo: `componentes`, `metricas`, `agrupaciones`, valores reales de cada dimensión y una `nota` de cobertura |
 | `GET /api/aggregate` | `metrica`, `group_by`, `fenomenos` (`F1,F2`), `organizacion`, `desde`, `hasta` (años enteros), `limite` (1–100, def. 25) | `filas[{clave, valor, doc_ids}]`, `total`, `cobertura{documentos_universo, documentos_en_dimension, documentos_contados, sin_dato_en_la_dimension}` |
 | `GET /api/timeline` | `fenomenos`, `desde`, `hasta` | serie anual ordenada, `granularidad: "anio"`, `cobertura` y un `aviso` con el 34% |
+| `GET /api/documentos` | `fenomeno` (`F1,F3`), `organizacion`, `formato`, `desde`, `hasta`, `limite` (1–100, def. 25), `offset` | `total`, `siguiente` (offset de la página siguiente o `null`), `filas[{doc_id, organizacion, anio, formato, fenomeno, fuente, n_fragmentos, primer_chunk_id}]`, `aviso` |
 | `GET /api/geo` | — | **siempre `disponible: false`**: la metadata no tiene lugar, país ni coordenadas |
 | `GET /api/evidence/{chunk_id}` | — | `chunk_id`, `doc_id`, `texto`, `fuente`, `organizacion`, `anio`, `formato`, `fenomeno`, `fenomeno_nombre`, `posicion`, `total_fragmentos` |
 | `GET /api/document/{doc_id}` | `chunk_id` (centro y fragmento marcado `citado`), `posicion` (centro alternativo, def. 0), `ventana` (fragmentos a cada lado, 0–10, def. 2) | cabecera (`formato`, `fuente`, `organizacion`, `anio`, `fenomeno`, `total_fragmentos`), `desde`, `hasta`, `hay_anterior`, `hay_siguiente` y `fragmentos[{chunk_id, posicion, texto, truncado, citado}]` |
 | `GET /api/trace/{trace_id}` | — | `spans` del turno (últimas 50 trazas). **Solo con `ARPIA_DEBUG_TRACE`**; si no, `disponible: false` |
-| `POST /api/view` | cuerpo: un `ViewSpec` | los datos ya resueltos: `filas`, `total`, `cobertura`, `aviso`, `nota`. Valida con el mismo esquema cerrado que el visualizador; una vista temporal agrupa por año |
+| `POST /api/view` | cuerpo: un `ViewSpec` | la vista lista para pintar (ver abajo). Valida con el mismo esquema cerrado que el visualizador; una vista temporal agrupa por año |
 
 Cada cifra viene con los `doc_id` que la sustentan, y `/api/evidence` abre el fragmento
 exacto: es la trazabilidad que exige `RETO.md`.
+
+### `POST /api/view` — la vista lista para pintar
+
+Una sola llamada devuelve todo lo que el tablero necesita; la GUI ya no arma series ni pide los hallazgos aparte.
+
+```json
+{
+  "disponible": true, "chart": "donut", "group_by": "organizacion", "serie_por": "fenomeno",
+  "titulo": "…", "metrica": "conteo_documentos", "fenomenos": ["F3"],
+  "categorias": ["Alertas_Tempranas", "SIPRI", "RESDAL"],
+  "series": [{"clave": "F3", "etiqueta": "F3 · Dinámicas Territoriales",
+              "valores": [425, 128, 107],
+              "doc_ids": [["F3-ALERTAS-001"], ["F3-SIPRI-015"], ["F3-RESDAL-099"]]}],
+  "categorias_omitidas": 0, "series_omitidas": 0,
+  "total": 888, "cobertura": {"…": "…"}, "aviso": "",
+  "hallazgos": [{"texto": "Alertas Tempranas y SIPRI acumulan 553 de 888 documentos (62 %)…",
+                 "soporte": ["Alertas_Tempranas", "SIPRI"], "doc_ids": ["F3-ALERTAS-001", "…"]}],
+  "complementarias": [ /* ViewSpec, como mucho 2 */ ],
+  "filas": [ /* {clave, valor, doc_ids}: formato de siempre, se conserva */ ]
+}
+```
+
+- **`categorias` × `series`.** `valores[i]` y `doc_ids[i]` corresponden a `categorias[i]`. Las categorías van cronológicas si se agrupa por año y por total descendente en los demás casos. `doc_ids` es una muestra de 10 por celda.
+- **`serie_por`.** Si se agrupa por algo distinto del fenómeno, hay una serie por fenómeno (F1, F2, F3 en ese orden, para que su color no cambie entre vistas). Si se agrupa por fenómeno, hay una sola serie `total`.
+- **Topes declarados, no silenciosos.** Como mucho 25 categorías (salvo el año) y 8 series; lo que se recorta se cuenta en `categorias_omitidas` y `series_omitidas`.
+- **`hallazgos` y `complementarias`** salen del mismo código que usa `/chat` (`dashboard.apoyo_de_vista`): el mismo gráfico dice lo mismo venga del chat o de un clic. Cada hallazgo trae `soporte` (categorías sobre las que se calculó) y `doc_ids`.
+- **Degrada sin caerse.** Si fallan las series o el apoyo, la vista sale igual con esos campos vacíos y `filas` intacto.
+
+### `GET /api/documentos` — los documentos detrás de una cifra
+
+Cada fila de `/api/aggregate` trae solo una muestra de 10 `doc_id`; esta es la lista completa con los mismos filtros, para "ver todos los documentos de esta barra". Orden por `doc_id` (paginación estable). `primer_chunk_id` abre `/api/evidence/{chunk_id}` y `doc_id` abre `/api/document/{doc_id}`: de la cifra al fragmento en dos clics.
+
+- Un filtro sin coincidencias es `total: 0` (no un error); un fenómeno fuera de F1–F3 es `disponible: false` con el motivo.
+- Con `desde`/`hasta`, el `aviso` declara cuántos documentos deja fuera el rango (todos los que no declaran año).
+- **Los parámetros inválidos de cualquier ruta `/api/*` devuelven `{disponible: false, motivo}` con 200.** Antes el manejador global contestaba con una respuesta de chat ("No se recibió ninguna consulta"), que no tenía relación con lo pedido.
+
+### `GET /api/components` — qué admite cada componente
+
+Además del catálogo de dimensiones con valores reales, devuelve `reglas` (una entrada por gráfico) y `limites`:
+
+```json
+"reglas": {
+  "timeline": {"group_by": ["anio"], "serie_por": true, "nota_obligatoria": true, "por_defecto": "anio"},
+  "donut":    {"group_by": ["fenomeno", "organizacion", "fuente", "formato"], "serie_por": false,
+               "nota_obligatoria": false, "por_defecto": "fenomeno"},
+  "kpi":      {"group_by": [], "serie_por": false, "nota_obligatoria": false, "por_defecto": null}
+},
+"limites": {"categorias": 25, "series": 8}
+```
+
+Son la misma fuente (`contracts.REGLAS_GRAFICO`) que usan el validador de `ViewSpec` y `POST /api/view`, así que lo que se anuncia es lo que se cumple: un `timeline` agrupa siempre por año, y `serie_por` solo existe donde la regla lo dice. El tablero puede leerlas en lugar de repetirlas en JavaScript (donde `normalizar()` ya divergió: forzaba cada dona a agrupar por fenómeno). Las reglas van **solo** en el endpoint: `componentes_disponibles()` también es lo que lee el visualizador y no se toca.
 
 ### Referencias: ver de dónde sale cada afirmación (hecho en backend y en el chat)
 

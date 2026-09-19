@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 # -- vocabulario cerrado ---------------------------------------------------
 # Los `Literal` son la frontera de seguridad del agente visualizador: lo que no
@@ -42,6 +43,48 @@ ChartType = Literal["timeline", "bar", "stacked_bar", "donut", "table", "kpi"]
 #   organizacion -> segundo nivel de la ruta `fuente` (CSIS_Aerospace, CSET_Georgetown...)
 #   anio         -> ano en el nombre de archivo; cubre 622 de 1.826 documentos (34%)
 GroupBy = Literal["fenomeno", "organizacion", "fuente", "formato", "anio"]
+
+#: Que admite cada componente. UNA sola fuente para el validador de `ViewSpec`,
+#: para `POST /api/view` y para `GET /api/components`: el tablero lee de aqui en
+#: vez de repetir estas reglas en JavaScript (donde ya divergieron: forzaba
+#: cada dona a agrupar por fenomeno). `group_by` vacio = el componente no agrupa.
+REGLAS_GRAFICO: dict[str, dict[str, Any]] = {
+    "timeline": {
+        "group_by": ["anio"],
+        "serie_por": True,
+        "nota_obligatoria": True,
+        "por_defecto": "anio",
+    },
+    "bar": {
+        "group_by": ["fenomeno", "organizacion", "fuente", "formato", "anio"],
+        "serie_por": True,
+        "nota_obligatoria": False,
+        "por_defecto": "fenomeno",
+    },
+    "stacked_bar": {
+        "group_by": ["fenomeno", "organizacion", "fuente", "formato", "anio"],
+        "serie_por": True,
+        "nota_obligatoria": False,
+        "por_defecto": "organizacion",
+    },
+    "donut": {
+        "group_by": ["fenomeno", "organizacion", "fuente", "formato"],
+        "serie_por": False,
+        "nota_obligatoria": False,
+        "por_defecto": "fenomeno",
+    },
+    "table": {
+        "group_by": ["fenomeno", "organizacion", "fuente", "formato", "anio"],
+        "serie_por": False,
+        "nota_obligatoria": False,
+        "por_defecto": "fenomeno",
+    },
+    "kpi": {"group_by": [], "serie_por": False, "nota_obligatoria": False, "por_defecto": None},
+}
+
+#: Graficos que pueden separar sus series por una segunda dimension.
+SERIE_POR_CHARTS = tuple(c for c, r in REGLAS_GRAFICO.items() if r["serie_por"])
+
 
 # Solo conteos y frecuencias. `RETO.md` prohibe presentar como medicion
 # objetiva cualquier indice, score de riesgo o nivel de amenaza calculado
@@ -177,6 +220,17 @@ class Citation(BaseModel):
     posicion: int | None = Field(None, description="Posicion del fragmento en su documento (0).")
     total_fragmentos: int | None = Field(None, description="Fragmentos del documento.")
     anio: int | None = Field(None, description="Ano, solo si el documento lo declara.")
+    organizacion: str | None = Field(
+        None,
+        description=(
+            "Quien publica, en su forma legible. `fuente` trae la ruta del archivo "
+            "cuando la organizacion no se conoce; este campo, solo el nombre."
+        ),
+    )
+    fenomeno: str | None = Field(None, description="F1, F2 o F3.")
+    fenomeno_nombre: str | None = Field(
+        None, description="El fenomeno en la forma en que se nombra al usuario."
+    )
 
 
 class ViewSpec(BaseModel):
@@ -239,6 +293,61 @@ class ViewSpec(BaseModel):
         ),
     )
 
+    # Oculta del esquema que ve el visualizador (`SkipJsonSchema`) a proposito.
+    # Medido con gpt-oss-20b: con el campo visible, la misma pregunta de dona de
+    # F3 pasaba de F3 a F1 en 4 de 4 corridas (con o sin usarlo), es decir, un
+    # dato mal filtrado. Se valida y funciona en el API, el tablero y el
+    # compositor; darselo al modelo es una decision que se toma midiendo.
+    serie_por: SkipJsonSchema[GroupBy | None] = None
+    # Tope de categorias ("las 5 organizaciones"). Oculto al modelo por la misma razon que
+    # `serie_por`: lo pone el codigo que lee la pregunta, no el visualizador.
+    limite: SkipJsonSchema[int | None] = Field(None, ge=1, le=25)
+
+    @model_validator(mode="after")
+    def _serie_por_coherente(self) -> ViewSpec:
+        """Ajusta la vista a las reglas de su propio componente. Nunca la invalida.
+
+        Dos correcciones, y ambas siguen el mismo criterio: **una vista
+        degradada es util; una vista descartada deja al analista sin grafico**.
+
+        1. **La dimension se ajusta al componente.** `REGLAS_GRAFICO` declara que
+           agrupaciones admite cada grafico —una dona reparte proporciones de
+           pocas categorias y no se lee por año; una serie temporal se lee sobre
+           el eje del tiempo— pero el esquema no las aplicaba, y el tablero
+           recibia combinaciones que sus propias reglas declaran imposibles.
+           Manda el componente y cede la dimension, no al reves: el modelo
+           acierta que forma pide la pregunta mucho mas a menudo que sobre que
+           dimension agruparla.
+
+        2. **Un cruce que no se puede pintar se quita.** Medido con el modelo
+           real: el cruce solo tiene sentido si es distinto del eje y si el
+           componente lo usa.
+        """
+        regla = REGLAS_GRAFICO.get(self.chart)
+        if regla and self.group_by is not None and self.group_by not in regla["group_by"]:
+            self.group_by = regla["por_defecto"]
+
+        eje = "anio" if self.chart == "timeline" else self.group_by
+        if self.serie_por is not None and (
+            self.serie_por == eje or self.chart not in SERIE_POR_CHARTS
+        ):
+            self.serie_por = None
+        return self
+
+
+class HallazgoDetalle(BaseModel):
+    """Un hallazgo con lo que permite rastrearlo: sobre que categorias se calculo
+    y que documentos lo sustentan (RETO.md §3.3: toda afirmacion, hasta su fuente)."""
+
+    texto: str
+    soporte: list[str] = Field(
+        default_factory=list, description="Categorias de la agregacion sobre las que se calculo."
+    )
+    doc_ids: list[str] = Field(
+        default_factory=list,
+        description="Muestra de documentos que lo sustentan; abren en /api/document/{doc_id}.",
+    )
+
 
 class AgentResponse(BaseModel):
     """Respuesta de `POST /chat`. Los tres primeros campos son el contrato ADL."""
@@ -251,6 +360,28 @@ class AgentResponse(BaseModel):
     mode: Mode = Field("stub", description='"live" en despliegue real; "stub" son datos simulados.')
     citations: list[Citation] = Field(default_factory=list)
     view_spec: ViewSpec | None = Field(None, description="Presente solo si el turno pide vista.")
+    view_specs: list[ViewSpec] = Field(
+        default_factory=list,
+        description=(
+            "La vista pedida y las que la explican. La primera es SIEMPRE `view_spec`, "
+            "que se mantiene por separado para no romper a ningun cliente que ya lo lea."
+        ),
+    )
+    hallazgos: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Lo que las cifras de la vista dicen, calculado sin modelo: frecuencias y "
+            "proporciones reales. Nunca indices, scores ni pronosticos (RETO.md "
+            "§Restricciones duras)."
+        ),
+    )
+    hallazgos_detalle: list[HallazgoDetalle] = Field(
+        default_factory=list,
+        description=(
+            "Los mismos `hallazgos`, en el mismo orden, con su soporte y sus `doc_id`. "
+            "`hallazgos` se conserva tal cual para no romper a ningun cliente."
+        ),
+    )
     trace_id: str = Field(
         "",
         description=(
