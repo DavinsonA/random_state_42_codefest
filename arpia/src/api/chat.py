@@ -287,7 +287,12 @@ def run_chat(texto: str, session_id: str) -> AgentResponse:
 
     # 5. Memoria: se guarda lo que costo producir. No se cachea un error ni un
     #    rechazo: repetirlos sale gratis y cachearlos congelaria un fallo
-    #    transitorio durante toda la ventana de evaluacion.
-    if not estado.startswith(("error", "rechazado")):
+    #    transitorio durante toda la ventana de evaluacion. Tampoco un turno
+    #    degradado que termino en `ok` (p. ej. plan de respaldo): el agente lo
+    #    anota en `turnlog` y aqui se respeta.
+    motivo = turnlog.no_cacheable()
+    if motivo:
+        log.info("turno no cacheado: %s", motivo)
+    elif not estado.startswith(("error", "rechazado")):
         memory.cache.guardar(texto, construida, session_id)
     return construida

@@ -77,7 +77,7 @@ fallan si se reinstala tu verificador anterior o si se quitan las citas.
 | # | Prioridad | Hallazgo | Archivos probables |
 |---|---|---|---|
 | 1 | ✅ **Resuelto** (ver 2.1) | El orquestador fallaba con la clave `Pasos`; ahora 6 de 6 llamadas válidas con el modelo real | `plan.py`, `executors.py` |
-| 2 | **P0** | El caché semántico guarda como buena la respuesta del plan de respaldo | `chat.py`, `memory.py`, `orchestrator.py` |
+| 2 | ✅ **Resuelto** (ver 2.1) | El caché semántico guardaba como buena la respuesta del plan de respaldo | `chat.py`, `turnlog.py`, `orchestrator.py` |
 | 3 | P1 | Ningún agente lee la conversación | `graph.py`, `orchestrator.py`, `executors.py` |
 
 ### 1. ✅ RESUELTO: el orquestador fallaba porque el modelo devolvía la clave `Pasos`
@@ -142,7 +142,9 @@ for q in ["¿Cuántos documentos hay por fenómeno?", "¿Qué reporta el corpus 
 Falta también una prueba automática: que `Plan` valide `{"Pasos": [...]}` y que el respaldo de
 una pregunta de conteo elija al analítico.
 
-### 2. El caché semántico guarda como buena la respuesta del plan de respaldo (P0)
+### 2. ✅ RESUELTO: el caché guardaba como buena la respuesta del plan de respaldo
+
+> **Estado:** corregido con la marca en `turnlog` (ver 2.1). Lo de abajo queda como registro.
 
 **Qué pasa.** Cuando el plan cae al respaldo, el turno termina con `estado: "ok"` y
 `chat.run_chat` lo guarda en el caché (solo excluye `error*` y `rechazado*`). Repetir la pregunta
@@ -205,7 +207,21 @@ fallaban con `Extra inputs are not permitted` sobre `Pasos`). Tras el arreglo: *
 - Comprobado por `/chat` con el modelo real: conteo por fenómeno → analítico con `doc_id`; pregunta de
   contenido → documental con citas; "Grafica…" → analítico + `view_spec` de barras.
 - 9 pruebas nuevas en `tests/test_graph.py` (328 en total).
-- **Sigue abierto el hallazgo 2:** el caché aún guarda como buena una respuesta de respaldo.
+
+### Hallazgo 2 (caché y plan de respaldo), cerrado en esta sesión
+
+Se siguió la primera propuesta: una marca en `turnlog`, sin cambiar el `estado`.
+
+- `turnlog.py`: `marcar_no_cacheable(motivo)` y `no_cacheable()`. Mismo canal que ya usan los
+  agentes con la API (`record_agent`, `add_citations`), seguro entre hilos porque el objeto es compartido.
+- `orchestrator.py`: `planificar` llama a `marcar_no_cacheable("plan_de_respaldo")` en sus dos salidas al
+  respaldo (excepción y plan no usable). Son 2 líneas.
+- `chat.py`: `run_chat` no guarda en el caché un turno marcado y lo deja en el log
+  (`turno no cacheado: plan_de_respaldo`).
+- Efecto: un fallo transitorio del modelo ya no se congela; repetir la pregunta vuelve a ejecutar el turno.
+- 4 pruebas nuevas (332 en total). Comprobé con un mutante que la de `test_chat.py` falla si se quita el
+  cambio de `chat.py`.
+- **Sigue abierto el hallazgo 3:** ningún agente lee la conversación.
 
 ---
 
@@ -224,6 +240,7 @@ fallaban con `Extra inputs are not permitted` sobre `Pasos`). Tras el arreglo: *
 > Davinson: gracias por cerrar los pendientes de `API.md`. Hice pruebas con el modelo real (índice de la Etapa 1, `bge-m3` y LiteLLM) y dejé
 > todo en `arpia/PENDIENTES_AGENTES.md`. (1) El orquestador fallaba porque `gpt-oss-120b` devolvía `Pasos`
 > y `Plan` la rechazaba; ya lo corregí en `plan.py` y `executors.py` (sección 2.1) y lo puedes revisar.
-> Lo urgente que queda: (2) el caché guarda como buena una respuesta de respaldo. También
+> El caché que guardaba como buena una respuesta de respaldo también quedó cerrado (marca en `turnlog`,
+> 2 líneas en `planificar`). Lo que queda es el hallazgo 3 (ningún agente lee la conversación). También
 > toqué `analitico` y `verifier.py` para que las cifras citen documentos reales; la sección 1
 > explica por qué y qué necesito que valides.

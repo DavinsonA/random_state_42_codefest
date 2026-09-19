@@ -258,6 +258,35 @@ def test_requests_simultaneas_no_mezclan_su_evaluacion(live):
     assert a["metadata"]["tokens"]["total"] == b["metadata"]["tokens"]["total"] == 30
 
 
+# -- el cache no guarda turnos degradados ------------------------------------
+
+
+class GrafoDegradado(FakeGraph):
+    """Termina en `ok` pero cayo al plan de respaldo, como el orquestador real."""
+
+    def invoke(self, state, config=None):
+        from src.observability import turnlog
+
+        turnlog.marcar_no_cacheable("plan_de_respaldo")
+        return super().invoke(state, config)
+
+
+def test_un_turno_normal_se_cachea(live):
+    client, graph = live()
+    _chat(client, "cuantos documentos hay", "sesion-aaaa1")
+    _chat(client, "cuantos documentos hay", "sesion-aaaa1")
+    assert len(graph.configs) == 1, "la segunda salio del cache"
+
+
+def test_un_turno_degradado_no_se_cachea(live):
+    client, graph = live(GrafoDegradado())
+    primera = _chat(client, "cuantos documentos hay", "sesion-aaaa1").json()
+    segunda = _chat(client, "cuantos documentos hay", "sesion-aaaa1").json()
+    assert primera["metadata"]["estado"] == "ok"
+    assert len(graph.configs) == 2, "repetir la pregunta vuelve a ejecutar el turno"
+    assert segunda["metadata"]["num_interacciones"] == 2, "no es una respuesta del cache"
+
+
 # -- agentes_invocados incluye a los que no gastan tokens -------------------
 
 

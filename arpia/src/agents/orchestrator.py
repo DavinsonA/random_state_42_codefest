@@ -143,6 +143,7 @@ def planificar(
             plan = crudo.get("parsed") if isinstance(crudo, dict) else crudo
             if not isinstance(plan, Plan) or not plan.pasos:
                 log.warning("el orquestador no devolvio un plan usable; se usa el de respaldo")
+                turnlog.marcar_no_cacheable("plan_de_respaldo")
                 sp.set_output("plan de respaldo (salida no usable)")
                 return plan_de_respaldo(pregunta)
 
@@ -150,5 +151,6 @@ def planificar(
             return plan
         except Exception as exc:  # noqa: BLE001 - frontera: planificar nunca tumba el turno
             log.warning("fallo la planificacion (%s); se usa el plan de respaldo", exc)
+            turnlog.marcar_no_cacheable("plan_de_respaldo")
             sp.set_output(f"plan de respaldo ({type(exc).__name__})")
             return plan_de_respaldo(pregunta)

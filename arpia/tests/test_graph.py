@@ -295,6 +295,26 @@ def test_un_fallo_del_gateway_al_planificar_degrada_a_plan_de_respaldo(entorno):
     assert "F1-DOC-0" in out["answer"]
 
 
+def test_el_plan_de_respaldo_marca_el_turno_como_no_cacheable(entorno):
+    """El turno termina en `ok`; sin la marca el cache congelaria la respuesta de respaldo."""
+    from src.observability import turnlog
+
+    g, llm, _ = entorno()
+    llm.fallar_plan = True
+    turnlog.start_turn()
+    g.invoke({"question": "capacidades antisatelite"}, _config())
+    assert turnlog.no_cacheable() == "plan_de_respaldo"
+
+
+def test_un_plan_valido_no_marca_el_turno(entorno):
+    from src.observability import turnlog
+
+    g, _, _ = entorno()
+    turnlog.start_turn()
+    g.invoke({"question": "capacidades antisatelite"}, _config())
+    assert turnlog.no_cacheable() == ""
+
+
 def test_un_fallo_al_redactar_entrega_la_evidencia_cruda(entorno):
     """Una disculpa generica puntua cero en relevancia; unos fragmentos con su
     procedencia son evidencia real."""
