@@ -249,6 +249,27 @@ def test_toda_vista_temporal_declara_su_cobertura(llm):
     assert "34%" in r.view_spec["nota"]
 
 
+def test_la_vista_hereda_el_fenomeno_que_acoto_el_plan(llm):
+    """Medido contra el gateway real: el visualizador solo recibe `consulta`, no
+    ve `paso.fenomeno`. Sin imponerlo, el titulo decia "seguridad del entorno
+    espacial" y el tablero pintaba los tres fenomenos."""
+    llm.spec = ViewSpec(chart="timeline", group_by="anio", titulo="Evolucion anual")
+    r = executors.visualizador(
+        Paso(agente="agente_visualizador", consulta="evolucion anual", fenomeno="F2")
+    )
+    assert r.view_spec["fenomenos"] == ["F2"]
+
+
+def test_el_fenomeno_que_eligio_el_modelo_manda_sobre_el_del_plan(llm):
+    """Se impone solo cuando el modelo no decidio: si eligio, su eleccion es mas
+    especifica que el filtro del plan y sobrescribirla seria perder informacion."""
+    llm.spec = ViewSpec(chart="bar", fenomenos=["F1", "F3"])
+    r = executors.visualizador(
+        Paso(agente="agente_visualizador", consulta="compara", fenomeno="F2")
+    )
+    assert r.view_spec["fenomenos"] == ["F1", "F3"]
+
+
 def test_el_visualizador_consulta_el_catalogo_antes_de_emitir(llm):
     """Proponer un componente que el tablero no puede poblar cuenta como fallo
     de ejecucion, no como vista imperfecta."""

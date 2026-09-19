@@ -30,10 +30,18 @@ EXPOSE 8000
 
 # Coolify usa esto para saber si el despliegue quedo sano. httpx ya es
 # dependencia del proyecto, no agrega nada nuevo a la imagen.
-# Nota: /health responde 503 solo si NADA funciona; un `degraded` sigue siendo
-# un despliegue util y no debe marcar el contenedor como unhealthy.
+#
+# Mide que el proceso RESPONDA, no que el servicio este completo: el estado
+# real viaja en el cuerpo de /health, no en su codigo. La diferencia no es
+# academica —se reprodujo—: recien creado el recurso, el indice todavia no se
+# ha subido por scp y /health devuelve 503 "down". Con `raise_for_status()` eso
+# marcaba el contenedor unhealthy, Traefik lo sacaba del pool y los tres
+# dominios contestaban "no available server"; es decir, el contenedor no podia
+# llegar a estar sano porque no se le dejaba vivir lo suficiente para recibir
+# el indice. Un contenedor que responde 503 sigue siendo util: recoge el indice
+# en cuanto aparece, sin reiniciar.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD python -c "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"
+  CMD python -c "import httpx; httpx.get('http://localhost:8000/health')"
 
 # UN SOLO worker, explicito y no negociable. Cada worker carga su propia copia
 # del indice FAISS y del encoder: ~3,8 GB medidos. Con 8 GB de contenedor, dos

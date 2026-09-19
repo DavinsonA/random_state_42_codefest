@@ -468,6 +468,14 @@ def visualizador(paso: Paso) -> Resultado:
                 sp.set_output("descartado: no valido contra el esquema cerrado")
                 return Resultado(agente=AGENTE_VISUALIZADOR, error="view_spec invalido")
 
+            if paso.fenomeno and not spec.fenomenos:
+                # El plan acoto la pregunta a un fenomeno y el visualizador no
+                # ve ese campo: solo recibe `consulta`. Sin esto el titulo dice
+                # "seguridad del entorno espacial" y el tablero pinta los tres,
+                # que es exactamente la cifra enganosa que `RETO.md` prohibe.
+                # Se impone, no se pregunta: cuesta cero tokens.
+                spec.fenomenos = [paso.fenomeno]
+
             if (spec.chart == "timeline" or spec.group_by == "anio") and not spec.nota:
                 # No se confia en que el modelo recuerde el aviso: se impone.
                 spec.nota = "Cobertura temporal: solo el 34% de los documentos declara ano."
