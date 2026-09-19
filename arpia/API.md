@@ -22,9 +22,10 @@
 | Caché semántico (0 tokens en aciertos) | ✅ hecho | `src/agents/memory.py` |
 | Grafo LangGraph: orquestador de plan único + replanificación | ✅ hecho | `src/agents/graph.py`, `orchestrator.py`, `plan.py` |
 | Ejecutores: documental, analítico, visualizador | ✅ hechos (probados con LLM falso) | `src/agents/executors.py` |
-| Registro por turno (tools, contexto, citas, tokens por agente) | ⚠️ hecho, con un fallo en planes paralelos (§12 #2) | `src/observability/` |
+| Registro por turno (tools, contexto, citas, tokens por agente), también en planes paralelos | ✅ hecho y corregido (§12 #2) | `src/observability/` |
 | Índice vectorial, encoder local, agregaciones | ✅ hecho | `src/retrieval/` |
 | Enrutamiento por `Host` (un contenedor, 3 dominios) | ✅ hecho | `src/api/routing.py` |
+| Traducción del modelo de la card al id de LiteLLM (`gateway_model_for`) | ✅ hecho (§6) | `src/agents/card.py` |
 | **Nada se ha probado aún con el modelo real** | ❌ | — |
 | `GET /topics` | ⏳ solo el contrato; sin endpoint | `contracts.py` |
 | `GET /api/evidence/{chunk_id}` | ⏳ mencionado en `contracts.py`; sin endpoint | — |
@@ -32,9 +33,10 @@
 | Interfaces `chat.html` / `dashboard.html` | ❌ `static/` no existe todavía (lo mantiene otra sesión) | `routing.py` |
 
 **Lo más importante que hay que saber:** el sistema completo está construido y sus
-199 pruebas pasan, **pero todas usan modelos falsos**. Al revisarlo aparecieron tres
-fallos que solo se ven con el modelo real o con planes de varios pasos (§12, #1 a #3).
-Hay que atenderlos antes de la entrega de las 08:00.
+214 pruebas pasan, **pero todas usan modelos falsos**. Al revisarlo aparecieron dos
+fallos que las pruebas originales no veían y que **ya están corregidos** (§12 #1 y #2:
+nombre de modelo y metadata en planes paralelos). Falta probar el grafo con el modelo
+real (#3) antes de la entrega de las 08:00.
 
 ---
 
@@ -323,13 +325,21 @@ Formato propio de ADL (§2.3), **no** el estándar A2A. Se sirve tal cual en
 ADL usa para calcular el costo por pregunta. `card.model_for(id)` alimenta el cliente de
 cada agente, con `LLM_MODEL` solo como respaldo.
 
-| Id | Modelo declarado | Tools declaradas | ¿Existe el modelo en LiteLLM? |
+| Id | Modelo declarado (lo que se reporta) | Tools declaradas | Id enviado a LiteLLM |
 |---|---|---|---|
-| `orquestador` | `gpt-oss-120b` | `delegar_documental`, `delegar_visualizacion` | ✅ |
-| `agente_documental` | `llama-3.3-70b-instruct` | `buscar_corpus`, `detalle_documento` | ❌ **no**: allí es `meta.llama3-3-70b-instruct` |
-| `agente_visualizador` | `gpt-oss-20b` | `componentes_disponibles`, `emitir_view_spec` | ✅ |
-| `agente_analitico` | `gpt-oss-20b` | `consultar_agregado` | ✅ |
+| `orquestador` | `gpt-oss-120b` | `delegar_documental`, `delegar_visualizacion` | `gpt-oss-120b` |
+| `agente_documental` | `llama-3.3-70b-instruct` | `buscar_corpus`, `detalle_documento` | ✅ traducido: se envía `meta.llama3-3-70b-instruct` |
+| `agente_visualizador` | `gpt-oss-20b` | `componentes_disponibles`, `emitir_view_spec` | `gpt-oss-20b` |
+| `agente_analitico` | `gpt-oss-20b` | `consultar_agregado` | `gpt-oss-20b` (0 tokens: no llama al modelo) |
 | `guardian`, `memoria` | — (deterministas) | no van en la card; **sí** aparecen en `agentes_invocados` | — |
+
+**Dos nombres para un mismo modelo.** La card usa el nombre del PDF de ADL, que es el
+que ADL cruza para calcular el costo y el que se **reporta** en `tokens_por_agente`
+(`card.model_for`). LiteLLM nombra distinto algunos modelos, y ese es el id con el que
+hay que **llamar** (`card.gateway_model_for`, que traduce con `_ALIAS_LITELLM`). Si un id
+cambia el día del evento, se corrige **sin tocar código** con la variable de entorno
+`MODEL_ALIASES` (JSON: `{"nombre-de-la-card": "id-de-litellm"}`). El agente analitico
+declara modelo pero no lo usa: cuesta 0 tokens.
 
 ### Modelos disponibles (LiteLLM del evento)
 
@@ -362,9 +372,11 @@ requests simultáneas no mezclen su evaluación** (ADL puede mandar preguntas en
 | `usage.py` | tokens y llamadas, **con desglose por agente y modelo**; cuenta la llamada aunque el proveedor no devuelva cifras (los tokens quedan en 0, nunca inventados) |
 | `tracing.py` | spans jerárquicos de la trayectoria (depuración) |
 
-⚠️ Un `ContextVar` **no se propaga** a los hilos de un `ThreadPoolExecutor`. `graph.ejecutar`
-usa uno cuando el plan tiene 2 o más pasos en paralelo, y ahí se pierde lo que anotan los
-ejecutores. Ver hallazgo §12 #2.
+Un `ContextVar` **no se propaga** a los hilos de un `ThreadPoolExecutor`. `graph.ejecutar`
+usa uno cuando el plan tiene 2 o más pasos en paralelo, así que **lanza cada tarea con su
+propia copia del contexto** (`contextvars.copy_context().run`); todas comparten los mismos
+acumuladores mutables del turno. Como varios hilos escriben en ellos a la vez,
+`usage.record_usage` y `turnlog.add_citations` llevan candado. Ver §12 #2.
 
 ---
 
@@ -396,6 +408,7 @@ credenciales nunca van en el código ni en la imagen.
 | `LLM_BASE_URL` | URL del LiteLLM del evento **terminada en `/v1`** | — |
 | `LLM_API_KEY` | key del equipo (bolsa de 100 USD) | — |
 | `LLM_MODEL` | **solo respaldo**: cada agente usa el modelo de la card | — |
+| `MODEL_ALIASES` | JSON que sobrescribe la traducción *nombre de la card → id de LiteLLM* | — |
 | `VECTOR_INDEX_PATH` | ruta del índice dentro del contenedor | `data/encoder_bge_m3` |
 | `CHECKPOINT_PATH` | archivo SQLite de la memoria conversacional | `state/checkpoints.sqlite` |
 | `AGENT_CARD_PATH` | ruta de la card | `agent_card.json` |
@@ -448,15 +461,18 @@ cp .env.example .env                                        # y rellenar; ARPIA_
 uv run uvicorn src.api.main:app --reload --port 8000
 
 uv run ruff check src tests --fix && uv run ruff format src tests
-uv run pytest tests -q                                      # 199 casos
+uv run pytest tests -q                                      # 214 casos
 ```
 
-199 casos en total (algunas funciones están parametrizadas; la columna cuenta funciones).
+214 casos en total (algunas funciones están parametrizadas; la columna cuenta funciones).
 
 | Archivo de pruebas | Qué protege | Funciones |
 |---|---|---|
 | `test_contract.py` | contratos, alias, `ViewSpec` cerrado, validador de tokens | 27 |
 | `test_graph.py` | plan, replanificación única, coste por turno, memoria, aislamiento de sesiones | 24 |
+| `test_modelos.py` | nombre de la card → id de LiteLLM; los clientes reales reciben el id traducido | 7 |
+| `test_paralelo.py` | un plan paralelo no pierde `tools_called`, contexto ni tokens; sin mezcla entre turnos | 4 |
+| `test_e2e_metadata.py` | un turno completo por `run_chat` con grafo real: lo que lee ADL | 1 |
 | `test_executors.py` | documental, analítico y visualizador | 21 |
 | `test_chat.py` | formato ADL, sesión, `thread_id`, requests simultáneas, degradación | 16 |
 | `test_memory.py` | caché semántico: umbral, tope, cero falsos aciertos | 13 |
@@ -464,8 +480,10 @@ uv run pytest tests -q                                      # 199 casos
 | `test_enrich.py` | `organizacion` y `anio` derivados | 8 |
 | `test_theme.py` | ningún color hexadecimal fuera de `src/theme/` | 6 |
 
-> Las pruebas del grafo cuentan llamadas con **contadores del LLM falso**; no leen
-> `turnlog` ni `usage`. Por eso no detectan los fallos de metadata de §12 #2 y #4.
+> Las pruebas de `test_graph.py` cuentan llamadas con **contadores del LLM falso**; no leen
+> `turnlog` ni `usage`. Por eso no detectaban el fallo de §12 #2; `test_paralelo.py` y
+> `test_e2e_metadata.py` sí lo leen (y se comprobó que fallan si el bug se reinstala).
+> Sigue sin detectarse lo de §12 #4 (`tools_called` del documental).
 
 ### Prueba de escritorio con modelo real (única hecha, previa a las Fases 3 y 4)
 
@@ -478,12 +496,13 @@ formato ADL completo, `tokens.total` = input + output (741), `X-Session-Id` devu
 ## 12. Pendientes y hallazgos
 
 Ordenados por impacto en la nota. Los #1 a #4 salieron de revisar el código de las Fases 3
-y 4 y **no los detectan las pruebas actuales**.
+y 4 y no los detectaban las pruebas originales. **#1 y #2 ya están corregidos**; #3 y #4
+siguen abiertos.
 
 | # | Tema | Por qué importa | Arreglo propuesto |
 |---|---|---|---|
-| 1 | **El modelo del documental no existe en LiteLLM.** La card dice `llama-3.3-70b-instruct`; LiteLLM acepta `meta.llama3-3-70b-instruct`. `redactar()` captura la excepción y entrega fragmentos crudos con `estado: ok` | En `live`, **toda** respuesta documental saldría sin redactar: se pierden Tono (25%) y Answer Relevancy. Falla en silencio | Verificar con una llamada de 1 token. Añadir un mapa *nombre de la card → id de LiteLLM* en `card.py` (la card conserva el nombre del PDF, que es el que ADL usa para el costo) |
-| 2 | **Se pierde la metadata en planes paralelos.** `graph.ejecutar` usa `ThreadPoolExecutor` y los `ContextVar` de `turnlog`/`usage` no llegan a esos hilos. Demostrado: con 2 pasos, `tools_called=[]`, `tokens_por_agente=[]`, `num_interacciones=0` | Un plan con 2+ pasos (comparaciones, "datos + vista") pierde `retrieval_context` (**Faithfulness, 30% del Bloque A**), `citations` y los tokens del visualizador (Bloque B) | Ejecutar cada tarea con su copia del contexto: `ctx = contextvars.copy_context(); pool.submit(ctx.run, executors.ejecutar, paso)`. Añadir una prueba que lea `turnlog`/`usage` con `paralelo=True` |
+| 1 | ✅ **CORREGIDO.** **El modelo del documental no existe en LiteLLM.** La card dice `llama-3.3-70b-instruct`; LiteLLM acepta `meta.llama3-3-70b-instruct`. `redactar()` captura la excepción y entrega fragmentos crudos con `estado: ok` | En `live`, **toda** respuesta documental saldría sin redactar: se pierden Tono (25%) y Answer Relevancy. Falla en silencio | Hecho: `card.gateway_model_for` traduce el nombre de la card al id de LiteLLM (§6); lo reportado sigue siendo el nombre de la card. Override en Coolify con `MODEL_ALIASES`. Falta confirmar con una llamada real de 1 token |
+| 2 | ✅ **CORREGIDO.** **Se pierde la metadata en planes paralelos.** `graph.ejecutar` usa `ThreadPoolExecutor` y los `ContextVar` de `turnlog`/`usage` no llegan a esos hilos. Demostrado: con 2 pasos, `tools_called=[]`, `tokens_por_agente=[]`, `num_interacciones=0` | Un plan con 2+ pasos (comparaciones, "datos + vista") pierde `retrieval_context` (**Faithfulness, 30% del Bloque A**), `citations` y los tokens del visualizador (Bloque B) | Hecho: cada tarea corre con `contextvars.copy_context().run`, más candados en `usage`/`turnlog`. Pruebas en `test_paralelo.py` y `test_e2e_metadata.py` |
 | 3 | **Nada probado con el modelo real.** `with_structured_output(Plan)` y `(ViewSpec)` dependen de que LiteLLM y `gpt-oss` soporten salida estructurada | Si falla, el orquestador cae siempre al plan de respaldo y el visualizador nunca emite vista (55% del Reto 2) | Prueba en `live` con `gpt-oss-20b` (barata) sobre 1 pregunta documental, 1 cuantitativa y 1 de vista |
 | 4 | **`tools_called` no refleja la recuperación.** El documental llama a `recuperar()` directo, no a la tool `buscar_corpus`; el stub sí la anota. El orquestador tampoco anota `delegar_*` | La card promete `buscar_corpus` y `delegar_*`; la traza no los muestra. Es una inconsistencia detectable en el Bloque D | Anotar `buscar_corpus` dentro de `recuperar()`, y o bien anotar `delegar_*` en `planificar` o ajustar la card a lo que existe |
 | 5 | **Índice y encoder en Coolify** | Sin índice, `/chat` cae siempre a `error_grafo` | Crear los 3 *Storages* de §10 y las variables como *Runtime* |

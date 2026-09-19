@@ -24,6 +24,7 @@ contenedor. Esa asimetria es la ventaja competitiva del sistema.
 
 from __future__ import annotations
 
+import contextvars
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
@@ -108,8 +109,18 @@ def ejecutar(state: AgentState) -> dict[str, Any]:
         return {}
 
     if plan.paralelo and len(pasos) > 1:
+        # Un ThreadPoolExecutor NO hereda los `ContextVar` del hilo que lo lanza, y
+        # `turnlog`, `usage` y `tracing` guardan en uno el estado del turno. Sin
+        # esta copia, lo que un ejecutor anota desde su hilo se pierde: ADL veria
+        # `tools_called=[]`, `retrieval_context` vacio (Faithfulness, 30% del bloque
+        # de calidad) y `tokens_por_agente=[]`. Una copia POR tarea, porque un
+        # `Context` no puede entrarse desde dos hilos a la vez; todas apuntan a los
+        # mismos acumuladores mutables del turno.
         with ThreadPoolExecutor(max_workers=len(pasos)) as pool:
-            resultados = list(pool.map(executors.ejecutar, pasos))
+            futuros = [
+                pool.submit(contextvars.copy_context().run, executors.ejecutar, p) for p in pasos
+            ]
+            resultados = [f.result() for f in futuros]
     else:
         resultados = [executors.ejecutar(p) for p in pasos]
 
