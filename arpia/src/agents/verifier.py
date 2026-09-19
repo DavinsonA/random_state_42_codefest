@@ -97,13 +97,20 @@ class Diagnostico:
 
 def diagnosticar(respuesta: str, evidencia: list[dict[str, Any]]) -> Diagnostico:
     """Compara los identificadores citados contra los recuperados. Sin tokens."""
+    # La evidencia agregada del agente analitico son conteos exactos, no
+    # documentos citables: su `chunk_id` es sintetico. Contarla aqui hacia que
+    # el verificador exigiera citas a una respuesta que no tiene nada que citar,
+    # y la reescritura acababa "citando" identificadores inventados como
+    # `agregado:organizacion:SIPRI` como si fueran documentos.
+    documental = [e for e in evidencia if not str(e.get("chunk_id", "")).startswith("agregado:")]
+
     citadas = set(_DOC_ID.findall(respuesta or ""))
-    disponibles = {str(e.get("doc_id", "")) for e in evidencia if e.get("doc_id")}
+    disponibles = {str(e.get("doc_id", "")) for e in documental if e.get("doc_id")}
     # Un doc_id agregado puede venir como "F1-A, F1-B": se separa para comparar.
     disponibles = {parte.strip() for d in disponibles for parte in d.split(",") if parte.strip()}
 
     fabricadas = citadas - disponibles
-    sin_citas = bool(evidencia) and not citadas and len(respuesta or "") >= MIN_CHARS_SIN_CITAS
+    sin_citas = bool(documental) and not citadas and len(respuesta or "") >= MIN_CHARS_SIN_CITAS
 
     motivo = ""
     if fabricadas:

@@ -106,13 +106,19 @@ def agregar(
     # un rango de anos descarta en silencio los documentos sin ano, asi que
     # medirla despues daria siempre "0 sin dato" — justo el mensaje tranquilizador
     # y falso que este campo existe para evitar.
-    dimensionado = filas
+    dimensionado = list(filas)
     sin_dato = sum(1 for f in dimensionado if not _valor(f, group_by))
 
     if desde is not None:
         filas = [f for f in filas if f.get("anio") and f["anio"] >= desde]
     if hasta is not None:
         filas = [f for f in filas if f.get("anio") and f["anio"] <= hasta]
+    # Un rango de anos descarta TODO documento sin ano, agrupe por lo que
+    # agrupe. Medido en el corpus: un rango 2005-2026 sobre un conteo por
+    # organizacion deja 621 de 1.826 documentos y hace desaparecer al mayor
+    # publicador, porque ninguno de sus documentos declara ano. Sin este numero
+    # la vista parece completa y no lo es.
+    excluidos_por_fecha = len(dimensionado) - len(filas)
 
     conteos: dict[str, int] = defaultdict(int)
     docs: dict[str, list[str]] = defaultdict(list)
@@ -137,6 +143,7 @@ def agregar(
             "documentos_en_dimension": len(dimensionado),
             "documentos_contados": len(filas),
             "sin_dato_en_la_dimension": sin_dato,
+            "excluidos_por_fecha": excluidos_por_fecha,
         },
     }
 

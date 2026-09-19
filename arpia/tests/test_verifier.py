@@ -134,3 +134,32 @@ def test_el_contador_permite_calibrar_el_disparador(llm):
     s = verifier.contador.stats()
     assert s["turnos"] == 3 and s["activaciones"] == 1
     assert s["tasa_activacion"] == pytest.approx(0.333, abs=0.01)
+
+
+# -- evidencia agregada: conteos exactos, no documentos citables ------------
+
+AGREGADA = [
+    {
+        "chunk_id": "agregado:organizacion:SIPRI",
+        "doc_id": "F3-SIPRI-015, F3-SIPRI-017",
+        "texto": "SIPRI: 128 documentos",
+        "citacion": "conteo exacto sobre 1826 documentos",
+    }
+]
+CONTEO = "Conteo de documentos por organizacion:\n- SIPRI: 128 documentos\n" * 4
+
+
+def test_un_conteo_exacto_no_necesita_citar_documentos(llm):
+    """Con el gateway real, el verificador exigio citas a una tabla de conteos y
+    la reescritura acabo 'citando' `agregado:organizacion:SIPRI` como si fuera
+    un documento. Un conteo exacto es evidencia por si mismo."""
+    assert len(CONTEO) >= MIN_CHARS_SIN_CITAS
+    d = diagnosticar(CONTEO, AGREGADA)
+    assert not d.requiere_verificacion
+    assert verificar(CONTEO, AGREGADA) == CONTEO
+    assert llm.llamadas == 0
+
+
+def test_la_evidencia_documental_sigue_exigiendo_citas(llm):
+    """El arreglo no puede apagar el verificador cuando si hay que citar."""
+    assert diagnosticar(LARGA_SIN_CITAS, [*AGREGADA, *EVIDENCIA]).sin_citas
