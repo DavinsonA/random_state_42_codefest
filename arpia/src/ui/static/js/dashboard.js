@@ -83,7 +83,15 @@ Chart.defaults.plugins.legend.labels.boxWidth = 10;
 // Animacion de los graficos: corta y con salida suave. Si el sistema pide
 // reducir movimiento, no se anima.
 const REDUCIR_MOVIMIENTO = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-Chart.defaults.animation = REDUCIR_MOVIMIENTO ? false : { duration: 650, easing: "easeOutQuart" };
+// Se MUTA `defaults.animation`, no se reemplaza: al sustituirlo entero se perdia la
+// configuracion por defecto de las animaciones de color, y cada grafico lanzaba
+// `this._fn is not a function` al animar `backgroundColor` y `borderColor`.
+if (REDUCIR_MOVIMIENTO) {
+    Chart.defaults.animation = false;
+} else {
+    Chart.defaults.animation.duration = 650;
+    Chart.defaults.animation.easing = "easeOutQuart";
+}
 
 // =============================================================================
 // RENDERIZADORES: cada uno dibuja en `cont` y devuelve su funcion de limpieza
