@@ -128,3 +128,33 @@ test("mensajeIndice traduce el motivo del backend", () => {
     assert.match(mensajeIndice("otra cosa"), /otra cosa/);
     assert.match(mensajeIndice(undefined), /No se pudieron cargar/);
 });
+
+// Una dona reparte un todo por cualquier dimension. `normalizar` la forzaba a
+// `fenomeno`: la dona de "documentos por organizacion" salia como un anillo de
+// una sola porcion, con el titulo de organizacion y los datos de fenomeno.
+test("una dona conserva la dimension que pidio el agente", () => {
+    for (const grupo of ["organizacion", "fuente", "formato", "fenomeno"]) {
+        assert.equal(normalizar({ chart: "donut", group_by: grupo }).group_by, grupo);
+    }
+});
+
+test("una dona sin dimension, o por anio, cae a fenomeno", () => {
+    assert.equal(normalizar({ chart: "donut" }).group_by, "fenomeno");
+    assert.equal(normalizar({ chart: "donut", group_by: "anio" }).group_by, "fenomeno");
+});
+
+test("la dona por organizacion pide el conteo por organizacion, una vez por fenomeno", async () => {
+    const pedidos = [];
+    globalThis.fetch = async (url) => {
+        pedidos.push(String(url));
+        return {
+            ok: true,
+            status: 200,
+            headers: { get: () => "application/json" },
+            json: async () => ({ disponible: true, filas: [{ clave: "SIPRI", valor: 4, doc_ids: ["a"] }], total: 4, cobertura: {} }),
+        };
+    };
+    const { datos } = await cargar(normalizar({ chart: "donut", group_by: "organizacion", fenomenos: ["F3"] }));
+    assert.ok(pedidos.every((u) => u.includes("group_by=organizacion")), pedidos.join(" | "));
+    assert.deepEqual(datos.filas.map((f) => [f.grupo, f.fenomeno]), [["SIPRI", "F3"]]);
+});

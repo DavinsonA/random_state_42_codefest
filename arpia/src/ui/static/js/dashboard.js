@@ -53,6 +53,21 @@ const tok = (nombre) => css.getPropertyValue(`--arpia-${nombre}`).trim();
 const colorFenomeno = (f) => tok({ F1: "f1", F2: "f2", F3: "f3" }[f] || "space");
 const etiquetaFenomeno = (f) => (FENOMENOS[f] ? `${f} · ${FENOMENOS[f]}` : f);
 
+/** Mezcla dos colores de token (`#RRGGBB`): 0 = `a`, 1 = `b`. */
+function mezclar(a, b, k) {
+    const c = (hex, i) => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16);
+    const canal = (i) => Math.round(c(a, i) + (c(b, i) - c(a, i)) * k).toString(16).padStart(2, "0");
+    return `#${canal(0)}${canal(1)}${canal(2)}`;
+}
+
+/** `n` colores distinguibles para categorias que no son fenomenos (organizaciones, formatos...).
+ *  Salen de los tonos de marca, aclarados en cada vuelta: los colores de F1-F3 y los semanticos
+ *  (advertencia, critico) quedan reservados a lo que significan. */
+function paletaCategorica(n) {
+    const marca = [tok("primary"), tok("space"), tok("electric")];
+    return Array.from({ length: n }, (_, i) => mezclar(marca[i % marca.length], tok("text"), 0.22 * Math.floor(i / marca.length)));
+}
+
 Chart.defaults.color = tok("text-secondary");
 Chart.defaults.borderColor = tok("border");
 Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
@@ -369,16 +384,30 @@ function dibujanteDe(spec, filas, total) {
             return (c) => dibujarSerie(c, { etiqueta, labels: anios, series, memoria });
         }
 
-        case "donut":
-            return (c) => dibujarDona(c, {
-                etiqueta,
-                partes: porFenomeno().map((g) => ({
-                    label: etiquetaFenomeno(g.k),
-                    valor: g.valor,
-                    color: colorFenomeno(g.k),
-                    meta: { titulo: g.k, doc_ids: g.doc_ids },
-                })),
-            });
+        case "donut": {
+            if (spec.group_by === "fenomeno" || !spec.group_by) {
+                return (c) => dibujarDona(c, {
+                    etiqueta,
+                    partes: porFenomeno().map((g) => ({
+                        label: etiquetaFenomeno(g.k),
+                        valor: g.valor,
+                        color: colorFenomeno(g.k),
+                        meta: { titulo: g.k, doc_ids: g.doc_ids },
+                    })),
+                });
+            }
+            // Por otra dimension: una porcion por categoria, sumando los fenomenos.
+            const grupos = agrupar(filas, (f) => f.grupo).sort((a, b) => b.valor - a.valor);
+            const resto = grupos.slice(MAX_CATEGORIAS);
+            const partes = grupos.slice(0, MAX_CATEGORIAS).map((g) => ({ label: legible(g.k), valor: g.valor, meta: { titulo: legible(g.k), doc_ids: g.doc_ids } }));
+            if (resto.length) {
+                const otros = t("tablero.otros");
+                partes.push({ label: otros, valor: resto.reduce((s, g) => s + g.valor, 0), meta: { titulo: otros, doc_ids: resto.flatMap((g) => g.doc_ids) } });
+            }
+            const colores = paletaCategorica(partes.length);
+            partes.forEach((p, i) => { p.color = colores[i]; });
+            return (c) => dibujarDona(c, { etiqueta, partes });
+        }
 
         case "table":
             return (c) => dibujarTabla(c, { columnaGrupo: NOMBRE_GROUP_BY[spec.group_by] || t("tablero.tabla.grupo"), filas });

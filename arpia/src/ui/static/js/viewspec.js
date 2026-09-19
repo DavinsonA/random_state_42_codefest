@@ -46,7 +46,9 @@ export function normalizar(vs) {
     let groupBy = GROUP_BY.includes(vs.group_by) ? vs.group_by : null;
     // Cada componente necesita una dimension concreta para tener sentido.
     if (vs.chart === "timeline") groupBy = "anio";
-    if (vs.chart === "donut") groupBy = "fenomeno";
+    // Una dona reparte un todo entre categorias: vale por cualquier dimension menos el ano
+    // (una dona de anios no dice nada; para eso esta la linea de tiempo).
+    if (vs.chart === "donut" && (!groupBy || groupBy === "anio")) groupBy = "fenomeno";
     if (vs.chart === "stacked_bar" && (!groupBy || groupBy === "fenomeno")) groupBy = "organizacion";
     if ((vs.chart === "bar" || vs.chart === "table") && !groupBy) groupBy = "fenomeno";
     return {

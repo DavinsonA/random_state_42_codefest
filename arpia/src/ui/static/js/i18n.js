@@ -46,7 +46,7 @@ const DICC = {
         "chart.timeline": "Serie anual",
         "chart.bar": "Barras",
         "chart.stacked_bar": "Barras apiladas por fenómeno",
-        "chart.donut": "Composición por fenómeno",
+        "chart.donut": "Composición",
         "chart.table": "Tabla",
         "chart.kpi": "Indicador",
 
@@ -158,6 +158,7 @@ const DICC = {
         "tablero.tabla.documentos": "Documentos",
         "tablero.total": "Total",
         "tablero.sinDato": "(sin dato)",
+        "tablero.otros": "Otros",
         "tablero.hallazgos": "Lo que dicen las cifras",
         "serie.tipo": "Tipo de gráfico",
         "serie.linea": "Línea",
@@ -197,7 +198,7 @@ const DICC = {
         "chart.timeline": "Yearly series",
         "chart.bar": "Bars",
         "chart.stacked_bar": "Bars stacked by phenomenon",
-        "chart.donut": "Composition by phenomenon",
+        "chart.donut": "Composition",
         "chart.table": "Table",
         "chart.kpi": "Indicator",
 
@@ -309,6 +310,7 @@ const DICC = {
         "tablero.tabla.documentos": "Documents",
         "tablero.total": "Total",
         "tablero.sinDato": "(no data)",
+        "tablero.otros": "Other",
         "tablero.hallazgos": "What the figures show",
         "serie.tipo": "Chart type",
         "serie.linea": "Line",
