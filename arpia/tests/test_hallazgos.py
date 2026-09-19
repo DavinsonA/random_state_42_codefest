@@ -35,9 +35,23 @@ F1 = [
 @pytest.mark.parametrize(
     "prohibido",
     [
-        "riesgo", "amenaza", "indice", "índice", "score", "puntaje", "nivel",
-        "tendencia", "tendencial", "proyecc", "se espera", "probable",
-        "preocupante", "alarmante", "critico", "crítico", "grave",
+        "riesgo",
+        "amenaza",
+        "indice",
+        "índice",
+        "score",
+        "puntaje",
+        "nivel",
+        "tendencia",
+        "tendencial",
+        "proyecc",
+        "se espera",
+        "probable",
+        "preocupante",
+        "alarmante",
+        "critico",
+        "crítico",
+        "grave",
     ],
 )
 def test_ningun_hallazgo_emite_juicios_ni_pronosticos(prohibido):
@@ -86,7 +100,7 @@ def test_sin_filas_no_hay_hallazgos_y_no_revienta():
     assert describir([], "organizacion") == []
 
 
-def test_una_sola_fila_no_produce_comparaciones()  :
+def test_una_sola_fila_no_produce_comparaciones():
     """Comparar una categoria consigo misma no dice nada."""
     uno = [Fila("Unica", 42, ["D-1"])]
     for h in describir(uno, "organizacion"):
@@ -126,6 +140,15 @@ def test_el_texto_lleva_tildes():
     assert "mas alta" not in textos, "falta la tilde de 'más'"
     assert "categorias" not in textos, "falta la tilde de 'categorías'"
     assert "organizacion" not in textos, "la dimensión se nombra sin tilde"
-    anios = [Fila("2024", 42, ["D-1"]), Fila("2025", 60, ["D-2"]), Fila("2026", 102, ["D-3"]),
-             Fila("2023", 5, ["D-4"])]
+    anios = [
+        Fila("2024", 42, ["D-1"]),
+        Fila("2025", 60, ["D-2"]),
+        Fila("2026", 102, ["D-3"]),
+        Fila("2023", 5, ["D-4"]),
+    ]
     assert "ano con" not in " ".join(h.texto for h in describir(anios, "anio"))
+
+
+def test_una_sola_categoria_no_produce_hallazgos():
+    """ "Concentra el 100 %" con una categoria no informa: no hay con que comparar."""
+    assert describir([Fila("F2", 479, ["F2-A"])], "fenomeno") == []

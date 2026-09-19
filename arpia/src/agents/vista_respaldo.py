@@ -25,6 +25,7 @@ de seguridad, y no deja de serlo porque quien la cruce sea codigo nuestro.
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from typing import Any
 
@@ -55,6 +56,31 @@ _DONA = (
 _LINEA = ("evolucion", "linea de tiempo", "serie", "tendencia", "a lo largo")
 _TABLA = ("tabla",)
 _APILADA = ("apilad",)
+_KPI = ("una sola cifra", "un solo numero")
+
+#: Lo que el corpus no tiene (lugar, mapa). Si el visualizador lo declino, NO se sustituye por
+#: otra vista: una barra de "documentos por fenomeno" no responde a "muestrame un mapa".
+_SIN_DATO = ("mapa", "geograf", "ubicacion", "donde ocurr", "coordenad", "red de actores")
+
+#: El usuario pidio VER algo aunque el orquestador no haya llamado al visualizador.
+_PIDE_VISTA = (
+    "tabla",
+    "grafic",
+    "dona",
+    "donut",
+    "barras",
+    "pastel",
+    "torta",
+    "visualiz",
+    "linea de tiempo",
+    "evolucion",
+    "tendencia",
+    "ha cambiado",
+    "han cambiado",
+    "a lo largo",
+    "quiero ver",
+    "una sola cifra",
+)
 
 #: Palabras que delatan un fenomeno cuando el conteo no lo dejo. Solo se usa si
 #: EXACTAMENTE uno coincide: ante la duda, sin filtro (los tres) es lo honesto.
@@ -78,6 +104,8 @@ def elegir_grafico(pregunta: str, group_by: str) -> str:
     que el corpus sostiene, y una dona por anios no dice nada.
     """
     p = _plano(pregunta)
+    if any(w in p for w in _KPI):
+        return "kpi"
     if group_by == "anio":
         return "timeline"
     if any(w in p for w in _TABLA):
@@ -89,6 +117,33 @@ def elegir_grafico(pregunta: str, group_by: str) -> str:
     if any(w in p for w in _LINEA):
         return "timeline"
     return "bar"
+
+
+def _anio(valor: object) -> str | None:
+    """`"2020"` -> `"2020"`; cualquier otra cosa, sin filtro (un ano mal escrito no tumba la vista)."""
+    crudo = str(valor or "").strip()
+    return crudo if len(crudo) == 4 and crudo.isdigit() else None
+
+
+_RANGO = re.compile(
+    r"\b(?:entre|de|del)\s+(?:el\s+)?((?:19|20)\d{2})\s+(?:y|a|al|hasta)\s+(?:el\s+)?((?:19|20)\d{2})\b"
+)
+_DESDE = re.compile(r"\b(?:desde|a partir de)\s+(?:el\s+)?((?:19|20)\d{2})\b")
+
+
+def periodo_de_pregunta(pregunta: str) -> tuple[str | None, str | None]:
+    """`("2020", "2025")` si la pregunta dice "entre 2020 y 2025"; `(None, None)` si no dice un periodo.
+
+    El analista no siempre filtra por el periodo pedido: sin esto, "entre 2020 y 2025" se
+    contesta con una vista que muestra todos los anos.
+    """
+    p = _plano(pregunta)
+    if m := _RANGO.search(p):
+        desde, hasta = sorted(m.groups())
+        return desde, hasta
+    if m := _DESDE.search(p):
+        return m.group(1), None
+    return None, None
 
 
 def fenomeno_de_pregunta(pregunta: str) -> list[str]:
@@ -122,23 +177,37 @@ def desde_turno(
         agentes: agentes que intervinieron en el turno (`turnlog.agentes()`).
         llamadas: tools llamadas en el turno (`turnlog.tool_calls()`).
     """
-    if AGENTE_VISUALIZADOR not in agentes:
+    plano = _plano(pregunta)
+    if any(w in plano for w in _SIN_DATO):
         return None
 
     conteo = _parametros_del_conteo(llamadas)
+    # El visualizador intervino, o el usuario lo pidio con todas las letras y el analista ya
+    # conto lo que hay que ver. Sin conteo y sin visualizador, no hay de donde sacar la vista.
+    pidio_a_mano = conteo is not None and any(w in plano for w in _PIDE_VISTA)
+    if AGENTE_VISUALIZADOR not in agentes and not pidio_a_mano:
+        return None
     if conteo is not None:
         group_by = str(conteo.get("group_by") or "fenomeno")
         metrica = str(conteo.get("metrica") or "conteo_documentos")
         fenomeno = str(conteo.get("fenomenos") or "")
         fenomenos = [fenomeno] if fenomeno in ("F1", "F2", "F3") else []
+        desde, hasta = (_anio(conteo.get(k)) for k in ("desde", "hasta"))
+        if desde is None and hasta is None:
+            desde, hasta = periodo_de_pregunta(pregunta)
     else:
+        desde, hasta = periodo_de_pregunta(pregunta)
         group_by = _dimension_de_pregunta(pregunta)
         metrica = "conteo_documentos"
         fenomenos = fenomeno_de_pregunta(pregunta)
 
     chart = elegir_grafico(pregunta, group_by)
     unidad = "Fragmentos" if metrica == "conteo_fragmentos" else "Documentos"
-    titulo = f"{unidad} por {NOMBRE_DIMENSION.get(group_by, group_by)}"
+    titulo = (
+        f"{unidad} en total"
+        if chart == "kpi"
+        else f"{unidad} por {NOMBRE_DIMENSION.get(group_by, group_by)}"
+    )
     if fenomenos:
         titulo += f" · {fenomenos[0]}"
 
@@ -147,7 +216,9 @@ def desde_turno(
             chart=chart,
             metrica=metrica,
             fenomenos=fenomenos,
-            group_by=group_by,
+            group_by=None if chart == "kpi" else group_by,
+            desde=desde,
+            hasta=hasta,
             titulo=titulo,
             nota=AVISO_COBERTURA if chart == "timeline" else "",
         )

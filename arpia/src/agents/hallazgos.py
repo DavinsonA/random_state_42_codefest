@@ -202,6 +202,8 @@ def describir(filas: list[Fila], dimension: str) -> list[Hallazgo]:
         que es una respuesta legitima y frecuente.
     """
     utiles = [f for f in filas if f.valor > 0]
+    if len(utiles) < 2:
+        return []  # una sola categoria: nada que comparar ("concentra el 100 %" no informa)
     total = sum(f.valor for f in utiles)
     if not utiles or total <= 0:
         return []
