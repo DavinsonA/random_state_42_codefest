@@ -4,7 +4,7 @@
 > ADL*; este documento dice *qué hay construido, cómo funciona y qué falta*.
 > Ante conflicto con la Especificación Técnica de ADL, manda la de ADL.
 >
-> Fecha de corte: `main` @ `1f23b11` — Fases 1 a 4 (19 de septiembre de 2026).
+> Fecha de corte: `main` @ `299494a` — Fases 1 a 5 y frontend del chat (19 de septiembre de 2026).
 > Si cambias el contrato o el comportamiento de un endpoint, **actualiza este archivo
 > en el mismo commit**. Un documento desactualizado es peor que ninguno.
 
@@ -22,21 +22,25 @@
 | Caché semántico (0 tokens en aciertos) | ✅ hecho | `src/agents/memory.py` |
 | Grafo LangGraph: orquestador de plan único + replanificación | ✅ hecho | `src/agents/graph.py`, `orchestrator.py`, `plan.py` |
 | Ejecutores: documental, analítico, visualizador | ✅ hechos (probados con LLM falso) | `src/agents/executors.py` |
+| Verificador condicional (0 tokens si la respuesta está sana) | ✅ hecho; ⚠️ no está declarado en la card (§12 #16) | `src/agents/verifier.py` |
 | Registro por turno (tools, contexto, citas, tokens por agente), también en planes paralelos | ✅ hecho y corregido (§12 #2) | `src/observability/` |
 | Índice vectorial, encoder local, agregaciones | ✅ hecho | `src/retrieval/` |
 | Enrutamiento por `Host` (un contenedor, 3 dominios) | ✅ hecho | `src/api/routing.py` |
 | Traducción del modelo de la card al id de LiteLLM (`gateway_model_for`) | ✅ hecho (§6) | `src/agents/card.py` |
 | **Nada se ha probado aún con el modelo real** | ❌ | — |
-| `GET /topics` | ⏳ solo el contrato; sin endpoint | `contracts.py` |
-| `GET /api/evidence/{chunk_id}` | ⏳ mencionado en `contracts.py`; sin endpoint | — |
-| Endpoint que entregue al tablero los datos de un `ViewSpec` | ⏳ no existe (la agregación sí: `aggregates.py`) | — |
-| Interfaces `chat.html` / `dashboard.html` | ❌ `static/` no existe todavía (lo mantiene otra sesión) | `routing.py` |
+| Endpoints del tablero: `/api/components`, `/api/aggregate`, `/api/timeline`, `/api/evidence/{chunk_id}`, `/api/trace/{trace_id}` | ✅ hechos | `src/api/dashboard.py` |
+| `GET /api/geo` | ⚠️ existe pero responde siempre "no disponible": el corpus no tiene lugar (§14) | `dashboard.py` |
+| `GET /api/graph` (lo cita `FRONTEND.md`) | ❌ no existe | — |
+| `GET /topics` | ⏳ solo el contrato; el frontend actual no lo consume | `contracts.py` |
+| Chat web (`chat.html`), sin CDN | ✅ hecho | `src/ui/static/` |
+| Tablero web (`dashboard.html`) y librerías vendorizadas (Plotly, Leaflet) | ❌ **no existen**: `dashboard.*` muestra un aviso (§14) | `src/ui/static/` |
 
-**Lo más importante que hay que saber:** el sistema completo está construido y sus
-214 pruebas pasan, **pero todas usan modelos falsos**. Al revisarlo aparecieron dos
-fallos que las pruebas originales no veían y que **ya están corregidos** (§12 #1 y #2:
-nombre de modelo y metadata en planes paralelos). Falta probar el grafo con el modelo
-real (#3) antes de la entrega de las 08:00.
+**Lo más importante que hay que saber:** el backend está construido y sus 238 pruebas
+pasan, **pero todas usan modelos falsos**. Dos fallos que las pruebas originales no veían
+ya están corregidos (§12 #1 y #2: nombre de modelo y metadata en planes paralelos). Falta
+probar el grafo con el modelo real (#3) antes de las 08:00, y **el tablero web aún no
+existe**: hay endpoints de datos (`/api/*`) pero no `dashboard.html`, así que el dominio
+`dashboard.*` hoy muestra un aviso (§14).
 
 ---
 
@@ -48,7 +52,13 @@ real (#3) antes de la entrega de las 08:00.
 | `GET /agent-card` | Agent card en JSON (formato ADL §2.3, no A2A) | ADL, expertos |
 | `GET /health` | ¿Está vivo el contenedor y con qué capacidades? | Coolify (healthcheck), humanos |
 | `GET /usage` | Consumo acumulado del proceso y eficacia del caché | Nosotros (vigilar los 100 USD) |
-| `GET /` | Sirve `chat.html` o `dashboard.html` según el `Host` | Navegador |
+| `GET /` | Sirve `chat.html` o `dashboard.html` según el `Host` (`src/ui/static/`) | Navegador |
+| `GET /api/components` | Catálogo de componentes y valores reales de cada dimensión | Tablero, agente visualizador |
+| `GET /api/aggregate` | Conteos agregados con los `doc_id` que los sustentan | Tablero |
+| `GET /api/timeline` | Serie anual de documentos, con su cobertura | Tablero |
+| `GET /api/geo` | **Siempre `disponible: false`**: el corpus no tiene lugar | Tablero |
+| `GET /api/evidence/{chunk_id}` | El fragmento exacto detrás de una cita | Tablero, chat |
+| `GET /api/trace/{trace_id}` | Árbol de ejecución de un turno reciente | Nosotros (depurar) |
 
 ### Regla dura: nunca un 500 ni un 422
 
@@ -72,7 +82,10 @@ Existe y devuelve, sin autenticación:
 | `memoria_persistente` | el checkpointer escribe en disco; `false` = la memoria vive en RAM |
 | `tools_registered`, `warnings` | tools disponibles y avisos legibles |
 
-Semántica: `200` con `ok`/`degraded`; **`503` solo si nada funciona**. En `stub` nunca es
+Los endpoints `/api/*` siguen la misma regla: **siempre 200**; un fallo o un dato
+inexistente llega como `{"disponible": false, "motivo": "…"}`. Detalle en §14.
+
+Semántica de `/health`: `200` con `ok`/`degraded`; **`503` solo si nada funciona**. En `stub` nunca es
 `ok`. El `HEALTHCHECK` del `Dockerfile` usa este endpoint (`raise_for_status`), por eso
 `degraded` no debe marcar el contenedor como *unhealthy*.
 
@@ -157,7 +170,8 @@ prohíbe que haya más).
 
   "mode": "live",                        // "live" | "stub"
   "citations": [ { "doc_id": "…", "chunk_id": "…", "fuente": "…", "fragmento": "…" } ],
-  "view_spec": null                      // ViewSpec (§4) solo si el turno pide una vista
+  "view_spec": null,                     // ViewSpec (§4) solo si el turno pide una vista
+  "trace_id": "…"                        // correlaciona con GET /api/trace/{trace_id}
 }
 ```
 
@@ -208,7 +222,9 @@ nunca declara un modelo propio.
 - **Entrada:** `ChatRequest`.
 - **Salida:** `AgentResponse` (alias `ChatResponse`) con `Evaluacion`, `ToolCall`,
   `Metadata`, `Tokens` (alias `TokenCount`), `TokensPorAgente`, `Citation`, `ViewSpec`.
-- **Operación:** `HealthResponse`, `UsageResponse`.
+- **Operación:** `HealthResponse` (incluye `memoria_persistente`), `UsageResponse` (incluye
+  las estadísticas del `verificador` y del caché).
+- `AgentResponse.trace_id` correlaciona cada respuesta con su árbol de ejecución.
 - **Definido, sin endpoint aún:** `Topic`, `TopicsResponse`.
 
 ### `ViewSpec` — la frontera de seguridad del agente visualizador
@@ -258,7 +274,7 @@ un acierto de caché ahorra el turno entero; la revisión de salida es la últim
 ### 5.2 En el grafo (`src/agents/graph.py`, LangGraph)
 
 ```
-START → begin → planificar → ejecutar ─┬→ componer → END
+START → begin → planificar → ejecutar ─┬→ componer → verificar → END
                     ▲                  │  (evidencia insuficiente y replans < 1)
                     └──────────────────┘
 ```
@@ -269,11 +285,13 @@ START → begin → planificar → ejecutar ─┬→ componer → END
 | `planificar` | el **orquestador** devuelve un `Plan` validado (máx. 3 pasos, agentes de la card, `paralelo`); si falla, `plan_de_respaldo` (documental) | `gpt-oss-120b` | 1 llamada |
 | `ejecutar` | corre los pasos (en paralelo si el plan lo pide) y consolida la evidencia | — | ver ejecutores |
 | `componer` | **una sola redacción** por turno con la evidencia final; añade cifras del analítico y el aviso de vista | `llama-3.3-70b-instruct` (card) | 1 llamada |
+| `verificar` | contrasta la respuesta contra su evidencia; solo llama al modelo si detecta un problema (§5.6) | `llama-3.3-70b-instruct` (card) | 0, o 1 llamada si se activa |
 | arista `tras_ejecutar` | replanifica **una** vez si ningún buscador halló evidencia (umbral 0,50) | — | — |
 
 Por qué un plan y no un bucle ReAct: el bucle hace entre 3 y 7 llamadas impredecibles; el
 Bloque B normaliza la eficiencia **contra los otros equipos**. Aquí el turno cuesta **2
-llamadas** y 3 en el peor caso.
+llamadas** y 3 en el peor caso (replanificación); el verificador suma una más **solo** si
+detecta un problema.
 
 ### 5.3 Ejecutores (`src/agents/executors.py`)
 
@@ -314,6 +332,26 @@ a una expresión regular no.
 - ⚠️ **El caché es global y compara solo el texto de la pregunta**, no la conversación.
   Ver hallazgo §12 #7.
 
+### 5.6 Verificador (`src/agents/verifier.py`) — condicional, 0 tokens si la respuesta está sana
+
+Corre al final del turno (`componer → verificar`). Detecta afirmaciones que la evidencia no
+respalda, con una comparación de conjuntos que **no cuesta tokens**: solo cuando falla paga
+una llamada para corregir. Dos disparadores, ambos de alta precisión a propósito:
+
+- **Cita fabricada:** la respuesta menciona un `doc_id` (`F1-XXXX-001`) que no está en la
+  evidencia del turno.
+- **Cero citas con evidencia disponible**, y solo si la respuesta tiene ≥ 240 caracteres: se
+  recuperó material y la respuesta no se apoya en ninguno.
+
+Si no puede corregir, **degrada** la respuesta a "no hay evidencia suficiente" en vez de
+devolver una cita inventada. Se descartó "puntaje de recuperación bajo" como disparador: una
+pregunta fuera de dominio puntúa 0,552 y la peor legítima 0,606; cinco centésimas no separan
+nada. `GET /usage` expone `verificador` (turnos, activaciones, tasa): si la tasa se acerca a
+1, el disparador está mal puesto y se paga una llamada extra por turno.
+
+⚠️ El verificador **no está declarado en la agent card** pero aparece en `agentes_invocados`
+y en `tokens_por_agente` cuando llama al modelo (§12 #16).
+
 ---
 
 ## 6. Agentes y modelos
@@ -332,6 +370,7 @@ cada agente, con `LLM_MODEL` solo como respaldo.
 | `agente_visualizador` | `gpt-oss-20b` | `componentes_disponibles`, `emitir_view_spec` | `gpt-oss-20b` |
 | `agente_analitico` | `gpt-oss-20b` | `consultar_agregado` | `gpt-oss-20b` (0 tokens: no llama al modelo) |
 | `guardian`, `memoria` | — (deterministas) | no van en la card; **sí** aparecen en `agentes_invocados` | — |
+| `verificador` | usa el de `agente_documental` | **no está en la card**, pero aparece en `agentes_invocados` cuando llama al modelo | `meta.llama3-3-70b-instruct` |
 
 **Dos nombres para un mismo modelo.** La card usa el nombre del PDF de ADL, que es el
 que ADL cruza para calcular el costo y el que se **reporta** en `tokens_por_agente`
@@ -370,7 +409,7 @@ requests simultáneas no mezclen su evaluación** (ADL puede mandar preguntas en
 |---|---|
 | `turnlog.py` | tools llamadas, `retrieval_context`, `citations` (deduplicadas por `chunk_id`) |
 | `usage.py` | tokens y llamadas, **con desglose por agente y modelo**; cuenta la llamada aunque el proveedor no devuelva cifras (los tokens quedan en 0, nunca inventados) |
-| `tracing.py` | spans jerárquicos de la trayectoria (depuración) |
+| `tracing.py` | spans jerárquicos de la trayectoria; conserva las **últimas 50 trazas** en memoria, consultables por `GET /api/trace/{trace_id}` |
 
 Un `ContextVar` **no se propaga** a los hilos de un `ThreadPoolExecutor`. `graph.ejecutar`
 usa uno cuando el plan tiene 2 o más pasos en paralelo, así que **lanza cada tarea con su
@@ -392,6 +431,11 @@ acumuladores mutables del turno. Como varios hilos escriben en ellos a la vez,
   como latencia. **El índice, en cambio, se carga en la primera llamada** (ver §12 #8).
 - **`aggregates.py`:** conteos y frecuencias sobre la tabla de 1.826 documentos, sin SQL;
   cada resultado trae los `doc_id` que lo sustentan y la cobertura del dato.
+- **`index.chunk(chunk_id)`** devuelve un fragmento por su id (lo usa `GET /api/evidence`).
+- ⚠️ **El tablero depende del índice.** `aggregates.tabla()` se construye desde
+  `_get_index().document_table()`; si el índice no está, **guarda una tabla vacía en caché y
+  no reintenta hasta reiniciar**, y `/api/aggregate` responde `disponible: true` con
+  `filas: []`: el tablero se vería vacío sin ningún aviso (§12 #17).
 - **Modo stub:** `/health` no carga el índice.
 
 ---
@@ -432,7 +476,9 @@ credenciales nunca van en el código ni en la imagen.
 
 - **Un solo contenedor, tres dominios.** `agent.*`, `frontagent.*` y `dashboard.*` apuntan
   al mismo servicio; `routing.py` decide qué HTML servir en `/` según el `Host`
-  (`dashboard.*` → tablero; cualquier otro → chat).
+  (`dashboard.*` → `dashboard.html`; cualquier otro → `chat.html`). Los archivos viven en
+  `src/ui/static/` y entran a la imagen con `COPY . .`. **`dashboard.html` no existe todavía**:
+  hasta que exista, `dashboard.*` responde 200 con un aviso.
 - **Coolify:** build pack `Dockerfile`, Base Directory `/arpia`, puerto `8000`, `www
   redirect` en *No redirect*. El `Dockerfile` hace `COPY . .` y **la frontera de qué entra
   la define `.dockerignore`**.
@@ -465,10 +511,10 @@ cp .env.example .env                                        # y rellenar; ARPIA_
 uv run uvicorn src.api.main:app --reload --port 8000
 
 uv run ruff check src tests --fix && uv run ruff format src tests
-uv run pytest tests -q                                      # 214 casos
+uv run pytest tests -q                                      # 238 casos
 ```
 
-214 casos en total (algunas funciones están parametrizadas; la columna cuenta funciones).
+238 casos en total (algunas funciones están parametrizadas; la columna cuenta funciones).
 
 | Archivo de pruebas | Qué protege | Funciones |
 |---|---|---|
@@ -482,6 +528,8 @@ uv run pytest tests -q                                      # 214 casos
 | `test_memory.py` | caché semántico: umbral, tope, cero falsos aciertos | 13 |
 | `test_guardian.py` | ataques rechazados **y** consultas legítimas que no deben rechazarse | 11 |
 | `test_enrich.py` | `organizacion` y `anio` derivados | 8 |
+| `test_dashboard.py` | endpoints `/api/*`: nunca 500, cobertura, trazabilidad, `geo` no disponible | 13 |
+| `test_verifier.py` | disparadores del verificador, degradación y que no salte en respuestas sanas | 11 |
 | `test_theme.py` | ningún color hexadecimal fuera de `src/theme/` | 6 |
 
 > Las pruebas de `test_graph.py` cuentan llamadas con **contadores del LLM falso**; no leen
@@ -489,7 +537,7 @@ uv run pytest tests -q                                      # 214 casos
 > `test_e2e_metadata.py` sí lo leen (y se comprobó que fallan si el bug se reinstala).
 > Sigue sin detectarse lo de §12 #4 (`tools_called` del documental).
 
-### Prueba de escritorio con modelo real (única hecha, previa a las Fases 3 y 4)
+### Prueba de escritorio con modelo real (única hecha, previa a las Fases 3, 4 y 5)
 
 `POST /chat` con `"Hola mundo"`, `ARPIA_MODE=live`, `gpt-oss-20b` vía LiteLLM: HTTP 200,
 formato ADL completo, `tokens.total` = input + output (741), `X-Session-Id` devuelto.
@@ -501,7 +549,8 @@ formato ADL completo, `tokens.total` = input + output (741), `X-Session-Id` devu
 
 Ordenados por impacto en la nota. Los #1 a #4 salieron de revisar el código de las Fases 3
 y 4 y no los detectaban las pruebas originales. **#1 y #2 ya están corregidos**; #3 y #4
-siguen abiertos.
+siguen abiertos. Del #9 al #13 se atendieron con la Fase 5 (ver cada fila); del #16 al #21
+son nuevos.
 
 | # | Tema | Por qué importa | Arreglo propuesto |
 |---|---|---|---|
@@ -513,13 +562,19 @@ siguen abiertos.
 | 6 | **Tope de tiempo por turno** | Hoy cada llamada tiene 60 s; el peor caso son 3 llamadas más recuperación. Un turno que exceda el timeout del evaluador se pierde | Plazo global por turno en `run_chat` que degrade a `_retrieval_fallback` |
 | 7 | **El caché ignora la conversación.** Compara solo el texto: "¿y en 2023?" puede recibir la respuesta cacheada de otra conversación | Devuelve una respuesta de otra pregunta con `estado: cache:0.96` | No cachear turnos que dependan del historial (con hilo previo), o incluir el hilo en la clave |
 | 8 | **`/health` carga el índice en su primera llamada.** `_check_index` → `check()` → `_load()` (1,3 GB) puede exceder los 5 s del healthcheck | Un healthcheck que falla en el arranque puede marcar el despliegue como fallido | Precalentar el índice en `lifespan`, junto al encoder |
-| 9 | `GET /topics` | El frontend lo necesita; solo existe el contrato | Endpoint con los 3 fenómenos y conteos reales |
-| 10 | `GET /api/evidence/{chunk_id}` | Trazabilidad del tablero (`RETO.md`) | Endpoint que devuelva texto, `doc_id`, fuente y posición |
-| 11 | **Endpoint de datos del tablero** | `aggregates.py` ya calcula los conteos; falta exponerlos: dado un `ViewSpec`, devolver los datos con `doc_id`/`chunk_id` | `POST /api/view-data` reutilizando `aggregates.agregar` |
+| 9 | `GET /topics` | Solo existe el contrato, y **el frontend actual no lo consume** (`api.js` solo llama `/chat` y `/health`) | Decidir si hace falta; si sí, endpoint con los 3 fenómenos y conteos reales |
+| 10 | ✅ **HECHO en la Fase 5.** `GET /api/evidence/{chunk_id}` | Trazabilidad del tablero (`RETO.md`) | Existe (`dashboard.py`); falta que el chat lo use al hacer clic en una cita (#20) |
+| 11 | ✅ **HECHO en la Fase 5.** Endpoint de datos del tablero | Los datos de un `ViewSpec` salen de `GET /api/aggregate` y `/api/timeline`, con `doc_id` y cobertura | Existe; falta el mapeo `ViewSpec → endpoint` en el frontend (§14) |
 | 12 | **Documento de arquitectura y propuesta de diseño por fenómeno**, dentro del repo y fuera de `docs/` | Entregable: vale el Bloque D (20%) y el 40% del Reto 2. `docs/architecture.md` está obsoleto | Redactarlo con la justificación de cada decisión de §13 |
-| 13 | `static/chat.html` y `static/dashboard.html` | `routing.py` degrada a un aviso legible mientras no existan | Lo mantiene otra sesión |
+| 13 | `chat.html` ✅ hecho; **`dashboard.html` y `vendor/` (Plotly, Leaflet) ❌ no existen** | El dominio `dashboard.*` muestra un aviso: sin él no hay Reto 2 desplegable (55% ejecución dinámica) | Lo mantiene el frontend; faltan además `viewspec.js` y `charts.js` |
 | 14 | Umbral de evidencia `0,50` sin recalibrar | El propio código lo marca; si salta siempre, gasta una llamada extra por turno | Recalibrar con consultas reales (Fase 5) |
 | 15 | Batería de prompt injection end-to-end contra el endpoint | Es el 15% del total del Reto 1 | Script con ataques propios sobre el endpoint desplegado |
+| 16 | **El verificador no está en la agent card** pero aparece en `agentes_invocados` y `tokens_por_agente` | ADL cruza esos ids contra la ficha; un id no declarado es una inconsistencia detectable en el Bloque D | Declararlo en `agent_card.json` (y en `agent_ids()`), o atribuir su consumo a `agente_documental` |
+| 17 | **La tabla del tablero se cachea vacía si el índice no está** (`aggregates.tabla`) y `/api/aggregate` responde `disponible: true` con `filas: []` | Si la primera petición llega antes de que el volumen del índice esté montado, el tablero queda vacío **hasta reiniciar**, sin aviso | No cachear el fallo; responder `disponible: false` cuando la tabla esté vacía |
+| 18 | **`FRONTEND.md` contradice al backend en 7 puntos** (§14): `fenomeno=` vs `fenomenos=`, citas con `quote`/`score`, `chart: "map"`, `lugar`, `group_by: "mes"`, fechas completas, `/api/graph` | Quien construya el tablero con esa guía escribirá código que el backend rechaza o ignora | Corregir `FRONTEND.md` con la tabla de §14 |
+| 19 | **`/api/*` y `/api/trace` son públicos y sin autenticación** en los tres dominios (incluido `agent.*`) | `trace` expone entradas y salidas de los spans de turnos recientes | Revisar qué incluye un span y decidir si `trace` debe quedar solo en desarrollo |
+| 20 | **El chat no usa `/api/evidence`**: `api.js` no tiene esa función, así que hacer clic en una cita no abre el fragmento | `FRONTEND.md` lo llama "requisito obligatorio de la especificación" | Añadir `obtenerEvidencia(chunk_id)` a `api.js` y enlazarlo en `chat.js` |
+| 21 | **Timeout del front (90 s) vs peor caso del backend**: 3 llamadas × 60 s más recuperación pueden superar 90 s | El front mostraría "tardó demasiado" aunque el backend termine bien | Se resuelve con el plazo global por turno (#6) |
 
 ### Documentos del repo que están desactualizados
 
@@ -527,6 +582,8 @@ siguen abiertos.
   "gateway"; **`RETO.md` manda**: repositorio **privado**, modelos vía LiteLLM/Bedrock.
 - `src/api/CONTRATO_GRAFO.md`: describe el grafo anterior; los "tres problemas de memoria"
   que enumera ya los corrigió la Fase 3.
+- `FRONTEND.md`: es una guía para la sesión del frontend y **discrepa del backend real**
+  (ver la tabla de §14). Ubica los archivos en `static/`; la ruta real es `src/ui/static/`.
 
 ---
 
@@ -563,3 +620,80 @@ siguen abiertos.
 | `b2672e8` | checkpointer SQLite en volumen propio; `requirements` con `--extra retrieval` |
 | `418aa0e` Fase 3 | orquestador de plan único con memoria conversacional |
 | `1f23b11` Fase 4 | los tres ejecutores, con el coste del turno acotado |
+| `1c1466e` Fase 5 | verificador condicional, traza consultable (`/api/trace`) y endpoints del tablero (`dashboard.py`) |
+| `01efafa` (PR #3) | corrige el modelo del documental (nombre de la card → id de LiteLLM) y la metadata perdida en planes paralelos |
+| `5c83a71` | frontend del chat en HTML plano (`src/ui/static/`), sin CDN |
+
+---
+
+## 14. Frontend y tablero (`src/ui/static/`)
+
+`FRONTEND.md` es la guía del equipo de frontend. Este apartado dice **qué existe de verdad** y
+dónde esa guía no coincide con el backend.
+
+### Qué hay
+
+| Pieza | Estado |
+|---|---|
+| `chat.html`, `css/tokens.css`, `css/app.css`, `js/api.js`, `js/chat.js` | ✅ existen |
+| `dashboard.html` | ❌ no existe: `dashboard.*` responde 200 con un aviso legible |
+| `vendor/` (Plotly, Leaflet) | ❌ no existe |
+| `viewspec.js`, `charts.js`, `map.js`, `graph.js` | ❌ no existen (los describe `FRONTEND.md`) |
+| Streamlit (`src/ui/app.py`) | sigue en el repo pero **ya no se despliega** |
+
+- **HTML plano, sin framework, sin build.** `chat.html` no tiene ninguna referencia externa
+  (verificado): sirve aunque la red del venue falle. `FRONTEND.md` prohíbe CDN y exige
+  vendorizar las librerías.
+- **Una sola capa de red.** `api.js` es el único que hace `fetch()`; expone `enviarChat`
+  (timeout de 90 s) y `obtenerSalud`. Manda `{texto, sesion_id}` a `/chat`.
+- **Lee los campos reales del backend:** `metadata.agentes_invocados`, `num_interacciones`,
+  `latencia_ms`, `tokens`, `estado`, `mode`, `citations[].doc_id/chunk_id/fuente/fragmento`
+  y `view_spec`.
+- **Cómo se sirve:** `routing.py` monta `src/ui/static/` dos veces (`/static/...` y `/...`) y
+  responde `/` según el `Host`. Como la API y la interfaz salen del mismo contenedor, no hay
+  CORS ni URL que configurar.
+
+### Endpoints del tablero (`src/api/dashboard.py`)
+
+Todos devuelven **HTTP 200**. Un fallo o un dato inexistente llega como
+`{"disponible": false, "motivo": "…"}`, para que el tablero distinga "no hay dato" de
+"el servicio se cayó". Todos cuestan **0 tokens**.
+
+| Endpoint | Parámetros | Devuelve |
+|---|---|---|
+| `GET /api/components` | — | catálogo: `componentes`, `metricas`, `agrupaciones`, valores reales de cada dimensión y una `nota` de cobertura |
+| `GET /api/aggregate` | `metrica`, `group_by`, `fenomenos` (`F1,F2`), `organizacion`, `desde`, `hasta` (años enteros), `limite` (1–100, def. 25) | `filas[{clave, valor, doc_ids}]`, `total`, `cobertura{documentos_universo, documentos_en_dimension, documentos_contados, sin_dato_en_la_dimension}` |
+| `GET /api/timeline` | `fenomenos`, `desde`, `hasta` | serie anual ordenada, `granularidad: "anio"`, `cobertura` y un `aviso` con el 34% |
+| `GET /api/geo` | — | **siempre `disponible: false`**: la metadata no tiene lugar, país ni coordenadas |
+| `GET /api/evidence/{chunk_id}` | — | `chunk_id`, `doc_id`, `texto`, `fuente`, `organizacion`, `anio`, `formato`, `fenomeno`, `fenomeno_nombre` |
+| `GET /api/trace/{trace_id}` | — | `spans` del turno (solo las últimas 50 trazas) |
+
+Cada cifra viene con los `doc_id` que la sustentan, y `/api/evidence` abre el fragmento
+exacto: es la trazabilidad que exige `RETO.md`.
+
+**Mapeo `ViewSpec → endpoint` (propuesta, aún no implementada en el frontend).** Los
+parámetros de `/api/aggregate` reflejan los campos del `ViewSpec`:
+
+| `chart` | Endpoint sugerido |
+|---|---|
+| `bar`, `stacked_bar`, `donut`, `table`, `kpi` | `GET /api/aggregate` con `metrica`, `group_by`, `fenomenos`, `desde`, `hasta` |
+| `timeline` | `GET /api/timeline` (o `/api/aggregate` con `group_by=anio`) |
+
+### `FRONTEND.md` frente al backend real
+
+Quien construya el tablero debe seguir **esta columna**, no la guía:
+
+| Tema | `FRONTEND.md` dice | El backend real |
+|---|---|---|
+| Ubicación de archivos | `static/` | `src/ui/static/` |
+| Filtro de fenómeno | `?fenomeno=F3` | `?fenomenos=F3` (plural, admite `F1,F2`) |
+| Campos de una cita | `doc_id`, `chunk_id`, `quote`, `score` | `doc_id`, `chunk_id`, **`fuente`**, **`fragmento`** (sin `score`) |
+| Tipos de gráfico | `timeline`, `bar`, `map`, `table` | `timeline`, `bar`, `stacked_bar`, `donut`, `table`, `kpi` — **sin `map`** |
+| Rango de fechas | `"desde": "2024-01-01"` | año de 4 dígitos (`"2024"`), patrón `^\d{4}$` |
+| Agrupación temporal | `group_by: "mes"` | solo `anio`; no hay `mes` ni `trimestre` |
+| Lugar | `"lugar": null` en el `ViewSpec` | el campo **no existe** (`extra="forbid"` lo rechazaría) |
+| Grafo de entidades | `GET /api/graph` | **no existe**: no hay extracción de entidades |
+| Mapas | Leaflet con capas por fenómeno | `/api/geo` responde siempre "no disponible"; no hay dato geográfico |
+
+El frontend **ya lee** los campos correctos en `chat.js`; la discrepancia está en la guía y
+en lo que aún no se ha construido (el tablero).

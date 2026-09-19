@@ -7,7 +7,7 @@
 > exige ADL en [`../RETO.md`](../RETO.md).
 >
 > Estado: **análisis hecho, nada modificado todavía** (ni `Dockerfile` ni `compose`).
-> Fecha de corte: `main` @ `1c1466e`, 19 de septiembre de 2026.
+> Fecha de corte: `main` @ `299494a` (Fases 1 a 5 y frontend del chat), 19 de septiembre de 2026.
 
 ---
 
@@ -44,8 +44,14 @@ al contenedor.
 - `docker-compose.yml`: **solo para desarrollo local.** Coolify con build pack `Dockerfile` lo
   ignora. Sus volúmenes (`hf-cache`, `estado`, `./data`) hay que recrearlos en la pestaña
   *Storages* de Coolify.
-- El chat y el tablero son **HTML estático** servido por la API. Streamlit (8501) ya no se
-  despliega. (`static/` aún no existe: `routing.py` muestra un aviso legible mientras tanto.)
+- El chat y el tablero son **HTML estático** que sirve la propia API desde `src/ui/static/`; ese
+  directorio entra a la imagen con `COPY . .`. Hoy existe `chat.html` (sin ninguna referencia
+  externa, así que no depende de un CDN); **`dashboard.html` y `vendor/` no existen**, por lo que
+  el dominio `dashboard.*` responde 200 con un aviso. Streamlit (8501) ya no se despliega, aunque
+  `src/ui/app.py` sigue en el repo.
+- La API expone además los endpoints del tablero (`/api/components`, `/api/aggregate`,
+  `/api/timeline`, `/api/geo`, `/api/evidence/{chunk_id}`, `/api/trace/{trace_id}`). Salen por el
+  mismo puerto 8000 y por los tres dominios, incluido `agent.*`.
 
 ---
 
@@ -62,6 +68,10 @@ Ordenados por gravedad. **Ninguno está corregido todavía.**
 | 5 | **`/health` carga el índice en su primera llamada** (1,3 GB) y puede exceder los 5 s del healthcheck | Un healthcheck fallido durante el arranque puede marcar el despliegue como fallido | Precalentar el índice en `lifespan`, junto al encoder |
 | 6 | **Docs contradictorios.** `deploy-test/README.md` dice que el repo será *público*; el skill `coolify-deploy` habla de Streamlit en 8501 | El PDF exige repo **privado**; con deploy key, Coolify a veces no persiste el *Base Directory* y hay que volver a fijarlo en *Build settings* | Corregirlos y borrar `deploy-test/` antes de la entrega (su propio README lo pide) |
 | 7 | **Auto Deploy.** Por defecto Coolify redespliega en cada `push` a la rama configurada | Un `push` entre 08:00 y 12:30 tumba el endpoint que se está evaluando | Apagar *Auto Deploy* desde las 08:00, o desplegar desde una rama `release` que solo se toque al congelar |
+| 8 | **`dashboard.html` no existe** (ni `vendor/` con Plotly y Leaflet). `routing.py` responde 200 con un aviso en `dashboard.*` | El Reto 2 no se puede desplegar ni evaluar (55% ejecución dinámica, 40% propuesta de diseño). Como el HTML entra en la imagen, cualquier ajuste posterior exige reconstruirla | Cerrarlo antes del congelamiento. Añadirlo a la lista de verificación (§7) |
+| 9 | **El tablero depende del índice y cachea el fallo.** `aggregates.tabla()` se construye desde el índice; si no está, guarda una tabla **vacía** y no reintenta hasta reiniciar. `/api/aggregate` responde `disponible: true` con `filas: []` | Si el índice llega después de que arranque `uvicorn` (script de descarga, volumen que se monta tarde), el tablero queda vacío **sin ningún aviso** hasta el próximo reinicio | El arranque debe **terminar de dejar el índice en su sitio antes de iniciar `uvicorn`** (ver D2). Y corregir el cacheo en `aggregates.py` (`API.md` §12 #17) |
+| 10 | **La imagen instala dependencias de UI que la API no usa.** `streamlit`, `plotly` y `pandas` figuran como dependencias, pero solo las importan `src/ui/app.py` y `src/theme/` | Más peso y más tiempo de build. *Tamaño exacto: **no medido*** | Moverlas a un extra opcional (p. ej. `ui`) y excluirlas del export de producción (ver D4) |
+| 11 | **Endpoints `/api/*` sin autenticación en los tres dominios**, incluido `agent.*`. `/api/trace/{trace_id}` devuelve entradas y salidas de los spans de turnos recientes | Exposición innecesaria en el dominio que evalúa ADL | Decidir si `trace` queda solo en desarrollo (`API.md` §12 #19) |
 
 **Dato medido por el equipo** (comentario del `Dockerfile`): índice + encoder ≈ **3,8 GB de
 RAM por proceso**. Con 8 GB de contenedor, dos workers rozan el límite.
@@ -85,6 +95,9 @@ RAM por proceso**. Con 8 GB de contenedor, dos workers rozan el límite.
 
 > El nombre de equipo `random-state-42` sale de la agent card. **Confirmarlo con el dominio
 > que asigne ADL** el día del evento.
+>
+> Las rutas `/api/*` del tablero salen por el mismo puerto 8000: los tres dominios con Port
+> `8000` las cubren, sin configuración adicional.
 
 ---
 
@@ -97,7 +110,7 @@ documento, no una decisión del equipo.
 
 | Opción | A favor | En contra |
 |---|---|---|
-| **A. Un recurso con los 3 dominios** (actual) | Menos piezas que puedan caerse; mitad de RAM (≈3,8 GB, no 7,6 GB) | Redesplegar el tablero reinicia también `/chat` |
+| **A. Un recurso con los 3 dominios** (actual) | Menos piezas que puedan caerse; mitad de RAM (≈3,8 GB, no 7,6 GB) | Redesplegar el tablero reinicia también `/chat`. Y como el HTML entra en la imagen (`COPY . .`), **cualquier ajuste del frontend implica reconstruir y redesplegar** |
 | B. Dos recursos: `agent`+`frontagent` y `dashboard` | Se despliegan por separado | Doble RAM y doble configuración |
 | C. Tres recursos | Aislamiento total | Triple RAM, sin beneficio real |
 
@@ -120,6 +133,10 @@ documento, no una decisión del equipo.
 
 - **Recomendación: A.**
 - **Falta decidir dónde se aloja:** Google Drive, Hugging Face (repo privado) u otro.
+- **Orden de arranque (importa):** el script debe **terminar** de dejar el índice en `/app/data`
+  *antes* de iniciar `uvicorn`. Si el servidor arranca primero y el índice llega después, la
+  tabla del tablero queda cacheada vacía hasta reiniciar (problema #9). No solo falla `/chat`:
+  también `/api/aggregate`, `/api/timeline`, `/api/evidence` y `/api/components`.
 
 ### D3 — ¿Dónde vive el encoder `bge-m3` (~2,2 GB)?
 
@@ -131,11 +148,14 @@ documento, no una decisión del equipo.
 - **Recomendación: A.** El *build* ya necesita internet para `pip`; si llega a PyPI, es muy
   probable que llegue a Hugging Face, pero **no está verificado**.
 
-### D4 — ¿`torch` de CPU y sin paquetes CUDA?
+### D4 — ¿`torch` de CPU, sin paquetes CUDA y sin dependencias de UI?
 
 - **Recomendación: sí.** Ahorra tiempo y disco de build. Pendiente **medir** el tamaño real de
   la imagen antes y después (hay Docker 29.7 instalado en la máquina de desarrollo, así que
   se puede hacer sin gastar presupuesto de tokens).
+- **Ampliación:** `streamlit`, `plotly` y `pandas` (problema #10) solo los usa `src/ui/app.py` y
+  `src/theme/`, no la API. Excluirlas del export de producción reduciría aún más la imagen.
+  Antes de quitarlas hay que confirmar que ningún camino de producción importe `src/theme/`.
 
 ### D5 — ¿Rama de despliegue?
 
@@ -183,6 +203,11 @@ documento, no una decisión del equipo.
 - [ ] Variables como *Runtime*, con `ARPIA_MODE=live`.
 - [ ] *Storages* creados y el índice cargado; `GET /health` con `index_loaded: true`.
 - [ ] `GET /agent-card` devuelve la ficha y su `endpoint` es el subdominio `agent.`.
+- [ ] `frontagent.` abre `chat.html` y `dashboard.` abre el **tablero** (no el aviso "la interfaz
+      … no está incluida en esta imagen").
+- [ ] `GET /api/aggregate?group_by=fenomeno` devuelve `filas` **no vacías** (prueba de que la
+      tabla se construyó con el índice ya montado). Si vino vacía, reiniciar el contenedor.
+- [ ] `GET /api/evidence/<chunk_id de una cita real>` devuelve el fragmento.
 - [ ] Una pregunta real por `POST /chat` con `mode: "live"` y `estado: "ok"`.
 - [ ] *Auto Deploy* apagado. Nadie hace `push` a la rama desplegada hasta las 12:30.
 - [ ] `deploy-test/` eliminado del repo.
@@ -196,5 +221,7 @@ Para que nadie lo dé por sabido:
 - El tamaño real de la imagen (con y sin CUDA).
 - El nombre de equipo definitivo en los dominios.
 - Cuánto tarda el primer arranque con el índice y el encoder reales.
+- Cuánto pesan `streamlit`, `plotly` y `pandas` en la imagen.
+- Si `dashboard.html` (y `vendor/`) estarán listos antes del congelamiento.
 - Que Coolify acepte los tres dominios sobre un mismo recurso con el mismo puerto (es lo
   esperable por la documentación de ADL, pero no se ha probado en su panel).
