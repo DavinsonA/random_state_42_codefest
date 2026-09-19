@@ -84,11 +84,11 @@ def _valor(fila: dict[str, Any], dimension: GroupBy) -> str:
 
 
 def _seleccion(
-    group_by: GroupBy,
     fenomenos: list[Fenomeno] | None,
     organizacion: str | None,
     desde: int | None,
     hasta: int | None,
+    formato: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
     """Filas que entran en una agregacion.
 
@@ -109,6 +109,8 @@ def _seleccion(
         filas = [f for f in filas if f.get("fenomeno") in permitidos]
     if organizacion:
         filas = [f for f in filas if f.get("organizacion") == organizacion]
+    if formato:
+        filas = [f for f in filas if f.get("formato") == formato]
     dimensionado = list(filas)
     if desde is not None:
         filas = [f for f in filas if f.get("anio") and f["anio"] >= desde]
@@ -144,7 +146,7 @@ def agregar(
         fuera por no tener el dato de la dimension pedida, medido antes de
         aplicar el rango temporal.
     """
-    filas, dimensionado, universo = _seleccion(group_by, fenomenos, organizacion, desde, hasta)
+    filas, dimensionado, universo = _seleccion(fenomenos, organizacion, desde, hasta)
     sin_dato = sum(1 for f in dimensionado if not _valor(f, group_by))
     # Un rango de anos descarta TODO documento sin ano, agrupe por lo que
     # agrupe. Medido en el corpus: un rango 2005-2026 sobre un conteo por
@@ -219,7 +221,7 @@ def agregar_series(
     if serie_por is not None and serie_por == group_by:
         raise ValueError("serie_por no puede ser igual a group_by")
 
-    filas, dimensionado, universo = _seleccion(group_by, fenomenos, organizacion, desde, hasta)
+    filas, dimensionado, universo = _seleccion(fenomenos, organizacion, desde, hasta)
     sin_dato = sum(1 for f in dimensionado if not _valor(f, group_by))
 
     peso = (lambda f: 1) if metrica == "conteo_documentos" else (lambda f: f["n_fragmentos"])
@@ -276,6 +278,56 @@ def agregar_series(
         },
         "categorias_omitidas": omitidas,
         "series_omitidas": series_omitidas,
+    }
+
+
+#: Filas por pagina como maximo. Un documento pesa poco, pero una pagina sin tope
+#: convierte "ver los documentos de esta barra" en volcar el corpus entero.
+MAX_PAGINA = 100
+
+
+def documentos(
+    *,
+    fenomenos: list[Fenomeno] | None = None,
+    organizacion: str | None = None,
+    formato: str | None = None,
+    desde: int | None = None,
+    hasta: int | None = None,
+    limite: int = 25,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Lista paginada de documentos, con los mismos filtros que `agregar`. CERO tokens.
+
+    Existe porque cada fila de un agregado solo lleva una muestra de 10
+    `doc_id`: para "ver todos los documentos de esta barra" hace falta la lista.
+    Ordenada por `doc_id` para que la paginacion sea estable entre llamadas.
+
+    Returns:
+        `{"total", "siguiente", "filas", "excluidos_por_fecha"}`. `siguiente` es
+        el `offset` de la pagina siguiente, o None en la ultima.
+    """
+    limite = max(1, min(int(limite), MAX_PAGINA))
+    offset = max(0, int(offset))
+    filas, dimensionado, _ = _seleccion(fenomenos, organizacion, desde, hasta, formato)
+    filas = sorted(filas, key=lambda f: f["doc_id"])
+    pagina = filas[offset : offset + limite]
+    return {
+        "total": len(filas),
+        "siguiente": offset + limite if offset + limite < len(filas) else None,
+        "filas": [
+            {
+                "doc_id": f["doc_id"],
+                "organizacion": f.get("organizacion") or "",
+                "anio": f.get("anio"),
+                "formato": f.get("formato") or "",
+                "fenomeno": f.get("fenomeno") or "",
+                "fuente": f.get("fuente") or "",
+                "n_fragmentos": f.get("n_fragmentos") or 0,
+                "primer_chunk_id": f"{f['doc_id']}__chunk_000000",
+            }
+            for f in pagina
+        ],
+        "excluidos_por_fecha": len(dimensionado) - len(filas),
     }
 
 

@@ -109,6 +109,55 @@ def aggregate(
         return _error(f"agregacion no disponible: {type(exc).__name__}")
 
 
+@router.get("/documentos")
+def documentos(
+    fenomeno: str = Query("", description='Ids separados por coma: "F1,F3"'),
+    organizacion: str = Query(""),
+    formato: str = Query(""),
+    desde: int | None = Query(None),
+    hasta: int | None = Query(None),
+    limite: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> JSONResponse:
+    """Los documentos detras de una cifra: lista paginada y filtrable.
+
+    Cada fila de `/api/aggregate` trae solo una muestra de 10 `doc_id`. Esto es
+    la lista completa —con los mismos filtros—, para abrir "todos los
+    documentos de esta barra". `primer_chunk_id` enlaza a `/api/evidence` y
+    `doc_id` a `/api/document/{doc_id}`: de la cifra al fragmento en dos clics.
+    """
+    try:
+        from src.retrieval import aggregates
+
+        if not aggregates.disponible():
+            return _error("el corpus aun no esta cargado en este despliegue")
+
+        lista = [f.strip().upper() for f in fenomeno.split(",") if f.strip()]
+        invalidos = [f for f in lista if f not in ("F1", "F2", "F3")]
+        if invalidos:
+            return _error(f"fenomeno no valido: {', '.join(invalidos)} (usa F1, F2 o F3)")
+
+        datos = aggregates.documentos(
+            fenomenos=lista or None,  # type: ignore[arg-type]
+            organizacion=organizacion or None,
+            formato=formato or None,
+            desde=desde,
+            hasta=hasta,
+            limite=limite,
+            offset=offset,
+        )
+        aviso = ""
+        if datos["excluidos_por_fecha"]:
+            aviso = (
+                f"El rango de anos deja fuera {datos['excluidos_por_fecha']} documentos, "
+                "incluidos todos los que no declaran fecha."
+            )
+        return JSONResponse(content={"disponible": True, **datos, "aviso": aviso})
+    except Exception as exc:  # noqa: BLE001 - el tablero nunca recibe un 500
+        log.warning("lista de documentos fallida: %s", exc)
+        return _error(f"documentos no disponibles: {type(exc).__name__}")
+
+
 @router.get("/timeline")
 def timeline(
     fenomenos: str = Query(""),

@@ -135,10 +135,23 @@ async def _sin_422(request: Request, exc: RequestValidationError) -> JSONRespons
     """Cuerpo malformado -> 200 con respuesta degradada, no 422.
 
     Es una red de seguridad: `chat.parse_body` ya acepta JSON y texto plano, asi
-    que en la practica no deberia dispararse. Si se dispara, el fallo es
+    que en la practica no deberia dispararse. Las rutas `/api/*` (tablero)
+    reciben `{disponible: false, motivo}`, no una respuesta de chat. Si se dispara, el fallo es
     nuestro y se reporta en `metadata.estado`, no se castiga la pregunta.
     """
     log.warning("cuerpo no parseable en %s: %s", request.url.path, exc.errors()[:2])
+    if request.url.path.startswith("/api/"):
+        # El tablero espera `{disponible, motivo}`, no una respuesta de chat: con
+        # `?limite=500` recibia "No se recibio ninguna consulta", que no tiene
+        # nada que ver con lo que pidio.
+        motivo = "; ".join(
+            f"{'.'.join(str(p) for p in e.get('loc', ())[1:])}: {e.get('msg', '')}"
+            for e in exc.errors()[:3]
+        )
+        return JSONResponse(
+            status_code=200,
+            content={"disponible": False, "motivo": f"parametros no validos ({motivo})"},
+        )
     return JSONResponse(status_code=200, content=chat_mod.invalid_input_response().model_dump())
 
 
