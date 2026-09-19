@@ -7,7 +7,7 @@
 > exige ADL en [`../RETO.md`](../RETO.md).
 >
 > Estado: **análisis hecho, nada modificado todavía** (ni `Dockerfile` ni `compose`).
-> Fecha de corte: `main` @ `4ae60f9`, 19 de septiembre de 2026.
+> Fecha de corte: `main` @ `adea37f`, 19 de septiembre de 2026.
 
 ---
 
@@ -65,11 +65,11 @@ Ordenados por gravedad. **Ninguno está corregido todavía.**
 | 2 | **La ruta del índice no coincide.** El código busca `data/encoder_bge_m3`; la carpeta local es `data/base_vectorial/encoder_bge_m3` | Aunque se monte el volumen, no lo encuentra | Fijar `VECTOR_INDEX_PATH` explícito y montar el volumen para que la ruta exista |
 | 3 | **Sin encoder no hay recuperación.** Los pesos de `bge-m3` (~2,2 GB) se descargan de Hugging Face al arrancar | Si el servidor de ADL no llega a `huggingface.co`, fallan la búsqueda vectorial **y** el caché semántico. El PDF pide imagen autosuficiente en *modelos* | Incluir el modelo en la imagen al construirla (decisión D3) |
 | 4 | **`requirements.txt` instala CUDA que no se usa.** Trae 15 paquetes `nvidia-*` y `triton`, porque `uv export` resuelve el `torch` de GPU en Linux. El encoder corre con `device="cpu"` | Builds lentos y pesados, más disco, riesgo de *timeout* al construir. *Tamaño exacto: **no medido** (estimado en varios GB)* | Instalar `torch` desde el índice CPU de PyTorch y excluir `nvidia-*`/`triton`. **Medir construyendo la imagen localmente** |
-| 5 | **`/health` carga el índice en su primera llamada** (1,3 GB) y puede exceder los 5 s del healthcheck | Un healthcheck fallido durante el arranque puede marcar el despliegue como fallido | Precalentar el índice en `lifespan`, junto al encoder |
+| 5 | ✅ **Resuelto en `adea37f`.** El arranque precalienta índice, tabla y encoder, así que `/health` ya no carga 1,3 GB en su primera llamada | Antes podía exceder los 5 s del healthcheck y marcar como fallido un despliegue que solo estaba cargando | Queda verificar el tiempo de arranque **en el servidor de ADL** (§8) |
 | 6 | **Docs contradictorios.** `deploy-test/README.md` dice que el repo será *público*; el skill `coolify-deploy` habla de Streamlit en 8501 | El PDF exige repo **privado**; con deploy key, Coolify a veces no persiste el *Base Directory* y hay que volver a fijarlo en *Build settings* | Corregirlos y borrar `deploy-test/` antes de la entrega (su propio README lo pide) |
 | 7 | **Auto Deploy.** Por defecto Coolify redespliega en cada `push` a la rama configurada | Un `push` entre 08:00 y 12:30 tumba el endpoint que se está evaluando | Apagar *Auto Deploy* desde las 08:00, o desplegar desde una rama `release` que solo se toque al congelar |
 | 8 | **`dashboard.html` no existe** (ni `vendor/` con Plotly y Leaflet). `routing.py` responde 200 con un aviso en `dashboard.*` | El Reto 2 no se puede desplegar ni evaluar (55% ejecución dinámica, 40% propuesta de diseño). Como el HTML entra en la imagen, cualquier ajuste posterior exige reconstruirla | Cerrarlo antes del congelamiento. Añadirlo a la lista de verificación (§7) |
-| 9 | **El tablero depende del índice y cachea el fallo.** `aggregates.tabla()` se construye desde el índice; si no está, guarda una tabla **vacía** y no reintenta hasta reiniciar. `/api/aggregate` responde `disponible: true` con `filas: []` | Si el índice llega después de que arranque `uvicorn` (script de descarga, volumen que se monta tarde), el tablero queda vacío **sin ningún aviso** hasta el próximo reinicio | El arranque debe **terminar de dejar el índice en su sitio antes de iniciar `uvicorn`** (ver D2). Y corregir el cacheo en `aggregates.py` (`API.md` §12 #17) |
+| 9 | ✅ **Cacheo corregido en `adea37f`**: la tabla del tablero ya no se guarda vacía; los endpoints responden `disponible: false` si el índice no está. El orden de arranque sigue importando | Si el índice llega tarde, el tablero muestra "no disponible" en vez de quedar en blanco hasta reiniciar | El script de descarga (D2) debe terminar de dejar el índice **antes** de iniciar `uvicorn` |
 | 10 | **La imagen instala dependencias de UI que la API no usa.** `streamlit`, `plotly` y `pandas` figuran como dependencias, pero solo las importan `src/ui/app.py` y `src/theme/` | Más peso y más tiempo de build. *Tamaño exacto: **no medido*** | Moverlas a un extra opcional (p. ej. `ui`) y excluirlas del export de producción (ver D4) |
 | 11 | **Endpoints `/api/*` públicos y de solo lectura en los tres dominios**, incluido `agent.*`. `/api/trace` (que exponía preguntas y salidas del modelo) **se cerró en `86e8244`**: solo responde con `ARPIA_DEBUG_TRACE` | Que `ARPIA_DEBUG_TRACE` quede encendido por error en Coolify | Dejarla **vacía** en el despliegue evaluado (`/health` advierte si `debug_trace` está activo) |
 
@@ -82,8 +82,9 @@ RAM por proceso**. Con 8 GB de contenedor, dos workers rozan el límite.
 
 Con el índice de la Etapa 1 y `bge-m3` en CPU, en una máquina de desarrollo:
 
-- **Carga del índice:** 4 s en la primera llamada a `/health` (límite del healthcheck: 5 s). Sigue siendo el
-  problema #5: en el servidor de ADL, con otro disco, puede pasar el límite.
+- **Carga del índice:** 4 s medidos en la primera llamada a `/health` (límite del healthcheck: 5 s). Desde `adea37f`
+  el arranque lo precalienta, así que ese tiempo se paga al arrancar; en el servidor de ADL, con otro disco, puede
+  ser mayor y es lo que hay que esperar antes de dar el contenedor por listo.
 - **Encoder:** la primera carga (descarga incluida) tardó **473 s**. Después, segundos.
 - **Pesos duplicados:** el snapshot de `BAAI/bge-m3` trae `model.safetensors` **y** `pytorch_model.bin`
   (2,12 GB cada uno), y Hugging Face guarda además un caché de fragmentos: **8,6 GB en disco** para un modelo

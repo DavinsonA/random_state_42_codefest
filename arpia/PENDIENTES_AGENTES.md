@@ -4,9 +4,10 @@
 > **Contexto:** pruebas manuales del 19 de septiembre con el índice de la Etapa 1
 > (326.866 fragmentos), `bge-m3` en CPU y LiteLLM (`gpt-oss-120b`, `gpt-oss-20b`,
 > `llama-3.3-70b-instruct`), servidor en `ARPIA_MODE=live`.
-> **Base:** `main` @ `4ae60f9` + el commit de trazabilidad de conteos (sección 1).
+> **Base:** `main` @ `adea37f` + el commit de trazabilidad de conteos (sección 1). Lo que ya cerraste en
+> `cfa7c79` y `adea37f` está en la sección 2.1.
 >
-> Las 267 pruebas de la suite pasan, pero **casi todas usan modelos falsos**: por eso
+> Las 279 pruebas de la suite pasan, pero **casi todas usan modelos falsos**: por eso
 > nada de lo que sigue lo detectaba. Cada hallazgo trae evidencia, propuesta de arreglo
 > y cómo comprobarlo. Detalle general del sistema en [`API.md`](API.md); decisiones de
 > despliegue en [`DEPLOY.md`](DEPLOY.md).
@@ -80,11 +81,6 @@ fallan si se reinstala tu verificador anterior o si se quitan las citas.
 | 3 | P1 | Ningún agente lee la conversación | `graph.py`, `orchestrator.py`, `executors.py` |
 | 4 | P1 | Calidad de la redacción: introducción de "la pregunta busca…" y mezcla de idiomas | `executors.py` (`REDACCION_PROMPT`) |
 | 5 | P1 | La reescritura del verificador puede filtrar estructura interna | `verifier.py`, `guardian.py` |
-| 6 | P2 | El verificador no está declarado en la agent card | `agent_card.json`, `card.py` |
-| 7 | P2 | Sin tope de tiempo por turno | `chat.py`, `graph.py` |
-| 8 | P2 | La tabla del tablero se cachea vacía si el índice no está | `aggregates.py` |
-| 9 | P2 | `/health` carga el índice en su primera llamada | `main.py`, `index.py` |
-| 10 | P2 | `delegar_*` no aparece en `tools_called` | `orchestrator.py`, `agent_card.json` |
 
 ### 1. El orquestador falla en preguntas cuantitativas de un solo paso (P0)
 
@@ -168,9 +164,8 @@ demostración las necesita.
 
 **Propuesta.** Pasar las últimas 1 o 2 vueltas (`state["messages"]`) al orquestador para que
 reescriba una pregunta de seguimiento como una consulta autónoma, y al redactor. Ojo con el
-caché semántico (pendiente #7 de `API.md`): compara solo el texto, así que "¿y en 2023?"
-puede recibir la respuesta cacheada de otra conversación; conviene no cachear turnos con
-historial previo.
+caché semántico: desde `adea37f` distingue conversaciones (un seguimiento solo acierta dentro
+de su sesión), así que ya no hay riesgo de que "¿y en 2023?" reciba la respuesta de otra conversación.
 
 ### 4. Calidad de la redacción (P1)
 
@@ -198,37 +193,20 @@ corchetes.
 explícitamente en `VERIFICACION_PROMPT` que nunca cite el sobre. Además, una respuesta que salió
 de código determinista no debería reescribirse con un modelo.
 
-### 6. El verificador no está en la agent card (P2)
+## 2.1 Ya resuelto en `main` (gracias)
 
-Aparece en `agentes_invocados` y en `tokens_por_agente` cuando llama al modelo, pero no está
-declarado en `agent_card.json`. ADL cruza esos ids contra la ficha; un id no declarado es una
-inconsistencia detectable en el Bloque D. Declararlo (con su modelo) o atribuir su consumo a
-`agente_documental`.
+Cinco de los pendientes que listé en la primera versión de este documento ya los cerraste. Los dejo
+anotados para que quede constancia de que se comprobaron contra el código:
 
-### 7. Sin tope de tiempo por turno (P2)
+| Pendiente | Commit | Qué se hizo |
+|---|---|---|
+| El verificador no estaba en la agent card | `adea37f` | Declarado en `agent_card.json` |
+| Sin tope de tiempo por turno | `adea37f` | `budget.py`: `TURN_BUDGET_S=75`, `REQUEST_TIMEOUT_S=25` y tres puntos de control |
+| La tabla del tablero se cacheaba vacía | `adea37f` | No se cachea el fallo; los endpoints responden `disponible: false` |
+| `/health` cargaba el índice en su primera llamada | `adea37f` | El arranque precalienta índice, tabla y encoder |
+| `delegar_*` no aparecía en `tools_called` | `cfa7c79` | `executors.DELEGACIONES` anota cada delegación; la card gana `delegar_analitico` |
 
-Cada llamada al modelo tiene `REQUEST_TIMEOUT_S = 60`, pero un turno puede encadenar planificar,
-ejecutar, replanificar, componer y verificar. Un turno más lento que el timeout del evaluador se
-pierde entero. El frontend espera 90 s. Un plazo global en `run_chat` que degrade a
-`_retrieval_fallback` lo resolvería.
-
-### 8. La tabla del tablero se cachea vacía si el índice no está (P2)
-
-`aggregates.tabla()` guarda `[]` ante cualquier error y no reintenta hasta reiniciar, y
-`/api/aggregate` responde `disponible: true` con `filas: []`. Si la primera petición llega antes
-de que el índice esté disponible, el tablero queda vacío sin aviso. No cachear el fallo, y
-responder `disponible: false` con una tabla vacía.
-
-### 9. `/health` carga el índice en su primera llamada (P2)
-
-Medido: 4 s (límite del healthcheck de Docker: 5 s). En el servidor de ADL, con otro disco,
-puede excederlo. Precalentar el índice en `lifespan`, junto al encoder.
-
-### 10. `delegar_*` no aparece en `tools_called` (P2)
-
-La card declara `delegar_documental` y `delegar_visualizacion` para el orquestador, pero el grafo
-usa un `Plan`, no llama tools con esos nombres. Anotarlas en `planificar` o ajustar la card a lo
-que existe. (`buscar_corpus` ya se registra tras `c9f48f5`.)
+También cerraste que el caché distinga conversaciones (`adea37f`).
 
 ---
 
@@ -244,7 +222,7 @@ que existe. (`buscar_corpus` ya se registra tras `c9f48f5`.)
 
 ## 4. Mensaje sugerido para Davinson
 
-> Davinson: hice pruebas con el modelo real (índice de la Etapa 1, `bge-m3` y LiteLLM) y dejé
+> Davinson: gracias por cerrar los pendientes de `API.md`. Hice pruebas con el modelo real (índice de la Etapa 1, `bge-m3` y LiteLLM) y dejé
 > todo en `arpia/PENDIENTES_AGENTES.md`. Lo urgente son dos cosas: (1) el orquestador falla en
 > preguntas de conteo de un solo paso porque `gpt-oss-120b` devuelve `Pasos` y `Plan` la rechaza,
 > así que el analítico no corre; (2) el caché guarda como buena esa respuesta de respaldo. También
