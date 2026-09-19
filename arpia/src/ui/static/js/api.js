@@ -67,3 +67,20 @@ export function enviarChat(texto, sesionId) {
 export function obtenerSalud() {
     return pedir("/health");
 }
+
+/** GET /api/aggregate — datos de una vista del tablero.
+ *
+ * PROPUESTO, aun no existe en el backend (pedido al arquitecto). Forma esperada:
+ *   { filas: [{ grupo, fenomeno, valor, doc_ids: [...] }],
+ *     total, cobertura: { con_dato, total }, nota, mode }
+ * Lanza ApiError con status 404 mientras no exista.
+ */
+export function obtenerAgregado({ metrica, group_by, fenomenos, desde, hasta }) {
+    const q = new URLSearchParams();
+    if (metrica) q.set("metrica", metrica);
+    if (group_by) q.set("group_by", group_by);
+    if (fenomenos && fenomenos.length) q.set("fenomenos", fenomenos.join(","));
+    if (desde) q.set("desde", desde);
+    if (hasta) q.set("hasta", hasta);
+    return pedir(`/api/aggregate?${q.toString()}`);
+}
