@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pytest
 
+from src.agents import voz
 from src.agents.guardian import (
     MAX_CHARS,
     envolver_documento,
@@ -109,7 +110,9 @@ def test_rechaza_cortesmente_lo_que_es_otra_tarea(consulta):
     v = revisar_entrada(consulta)
     assert not v.permitido
     assert v.categoria == "fuera_de_dominio"
-    assert "fenomenos" in v.texto  # el rechazo reencauza, no solo niega
+    # El rechazo reencauza en vez de solo negar, y sale del modulo de voz:
+    # una degradacion es cuando mas se nota el tono.
+    assert v.texto == voz.FUERA_DE_DOMINIO
 
 
 # -- saneamiento -------------------------------------------------------------

@@ -21,7 +21,7 @@ from types import SimpleNamespace  # noqa: E402
 import pytest  # noqa: E402
 from langgraph.checkpoint.memory import InMemorySaver  # noqa: E402
 
-from src.agents import executors, graph, orchestrator  # noqa: E402
+from src.agents import executors, graph, orchestrator, voz  # noqa: E402
 from src.agents.plan import Paso, Plan  # noqa: E402
 from src.retrieval import aggregates  # noqa: E402
 from src.retrieval.index import Hit  # noqa: E402
@@ -301,7 +301,7 @@ def test_un_fallo_al_redactar_entrega_la_evidencia_cruda(entorno):
     g, llm, _ = entorno()
     llm.fallar_redaccion = True
     out = g.invoke({"question": "satelites"}, _config())
-    assert "Fragmentos mas relevantes" in out["answer"]
+    assert voz.SIN_REDACCION in out["answer"]
     assert "F1-DOC-0" in out["answer"]
 
 
@@ -315,7 +315,7 @@ def test_un_agente_no_implementado_no_tumba_el_turno(entorno):
 def test_sin_evidencia_lo_dice_en_vez_de_inventar(entorno):
     g, llm, _ = entorno(n=0)  # el indice no devuelve nada
     out = g.invoke({"question": "algo que no existe"}, _config())
-    assert "No encontre evidencia" in out["answer"]
+    assert out["answer"] == voz.SIN_RESULTADOS
     assert llm.redacciones == 0  # no se paga una redaccion sin nada que redactar
 
 

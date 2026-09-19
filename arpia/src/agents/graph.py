@@ -32,7 +32,7 @@ from typing import Any, Literal
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langgraph.graph import END, START, StateGraph
 
-from src.agents import budget, executors, orchestrator, verifier
+from src.agents import budget, executors, orchestrator, verifier, voz
 from src.agents.memory import VENTANA_TURNOS
 from src.agents.plan import MAX_REPLANES, Paso, Plan
 from src.agents.state import TURNO_LIMPIO, AgentState
@@ -201,8 +201,7 @@ def componer(state: AgentState) -> dict[str, Any]:
 
     if not partes and evidencia:
         partes.append(
-            "No pude redactar una respuesta, pero estos son los fragmentos mas "
-            "relevantes del corpus:\n\n"
+            f"{voz.SIN_REDACCION}\n\n"
             + "\n\n".join(
                 f"[{i}] ({e['citacion']}) {e['texto'][:500]}"
                 for i, e in enumerate(evidencia[:5], 1)
@@ -210,17 +209,11 @@ def componer(state: AgentState) -> dict[str, Any]:
         )
 
     if state.get("view_spec"):
-        titulo = (state["view_spec"] or {}).get("titulo") or "la vista solicitada"
-        partes.append(f"He preparado {titulo} en el tablero.")
+        titulo = (state["view_spec"] or {}).get("titulo") or "La vista solicitada"
+        partes.append(f"{titulo}: disponible en el tablero.")
 
     if not partes:
-        partes.append(
-            "No encontre evidencia en el corpus para responder esa consulta. El "
-            "corpus cubre inteligencia artificial y capacidades estrategicas, "
-            "seguridad del entorno espacial, y dinamicas territoriales en America "
-            "Latina; si reformulas la pregunta hacia alguno de esos temas, la "
-            "respondo con sus fuentes."
-        )
+        partes.append(voz.SIN_RESULTADOS)
 
     texto = "\n\n".join(partes)
     return {"answer": texto, "messages": [AIMessage(content=texto)]}
