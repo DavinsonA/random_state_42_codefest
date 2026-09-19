@@ -177,3 +177,13 @@ def test_una_serie_temporal_no_se_acompana_de_una_dona_de_anios():
     concentradas = [Fila("2025", 90), Fila("2024", 60), Fila("2023", 5), Fila("2022", 3), Fila("2021", 2)]
     vistas = componer(principal, concentradas)
     assert not any(v.chart == "donut" for v in vistas)
+
+
+def test_el_tope_del_usuario_acota_tambien_las_vistas_que_lo_acompanan():
+    principal = ViewSpec(chart="bar", group_by="organizacion", limite=3, titulo="Top 3")
+    filas = [Fila("A", 90), Fila("B", 60), Fila("C", 5), Fila("D", 3), Fila("E", 2)]
+    complementarias = componer(principal, filas)[1:]
+    assert complementarias, "un reparto concentrado tiene apoyo"
+    for v in complementarias:
+        if v.group_by == "organizacion":
+            assert v.limite == 3

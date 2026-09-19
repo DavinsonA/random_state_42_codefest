@@ -201,6 +201,10 @@ def componer(principal: ViewSpec, filas: list[Fila]) -> list[ViewSpec]:
             continue
         if v.chart == "timeline" or v.group_by == "anio":
             v.nota = v.nota or AVISO_COBERTURA
+        # Un "top 5" acota tambien lo que lo acompana: una dona con nueve organizaciones
+        # junto a una barra de tres cuenta dos historias distintas.
+        if principal.limite and v.limite is None and v.group_by == principal.group_by:
+            v.limite = principal.limite
         if _clave(v) in vistos:
             continue
         vistos.add(_clave(v))
