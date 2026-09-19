@@ -3,39 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>A.R.P.I.A. · Tablero de análisis</title>
+    <title data-i18n="tablero.titulo">A.R.P.I.A. · Tablero de análisis</title>
     <meta name="description" content="Tablero de A.R.P.I.A.: el agente actualiza las visualizaciones según la pregunta, con trazabilidad a cada documento.">
 
     <!-- librerias vendorizadas: nunca CDN (FRONTEND.md) -->
-    <link rel="stylesheet" href="/static/vendor/leaflet.css">
-    <link rel="stylesheet" href="/static/css/tokens.css">
-    <link rel="stylesheet" href="/static/css/app.css">
-    <link rel="stylesheet" href="/static/css/tablero.css">
-    <script src="/static/vendor/chart.umd.min.js"></script>
-    <script src="/static/vendor/leaflet.js"></script>
-    <script type="module" src="/static/js/dashboard.js"></script>
+    <link rel="stylesheet" href="vendor/leaflet.css">
+    <link rel="stylesheet" href="css/tokens.css">
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/tablero.css">
+    <script src="vendor/chart.umd.min.js"></script>
+    <script src="vendor/leaflet.js"></script>
+    <script type="module" src="js/dashboard.js"></script>
 </head>
 <body class="pagina-tablero">
 
     <header class="barra">
         <div class="marca">
-            <img src="/static/img/logo.png" alt="A.R.P.I.A." class="marca-fac">
-            <img src="/static/logo.jpg" alt="A.R.P.I.A." class="marca-logo">
-            <span class="marca-tablero">Tablero Analítico</span>
+            <img src="img/logo.png" alt="A.R.P.I.A." class="marca-fac">
+            <img src="logo.jpg" alt="A.R.P.I.A." class="marca-logo">
+            <span class="marca-tablero" data-i18n="tablero.marca">Tablero Analítico</span>
         </div>
 
-        <div class="barra-acciones">
+        <div class="barra-acciones" id="barra-acciones">
             <span class="salud" id="salud" data-estado="cargando" role="status">
                 <span class="salud-punto" aria-hidden="true"></span>
-                <span class="salud-texto">Verificando servicio…</span>
+                <span class="salud-texto" data-i18n="salud.verificando">Verificando servicio…</span>
             </span>
-            <a class="boton boton-secundario" id="enlace-chat" href="#" hidden>Chat</a>
+            <a class="boton boton-secundario" id="enlace-chat" href="#" hidden data-i18n="tablero.chat">Chat</a>
         </div>
     </header>
 
     <div class="aviso aviso-simulado" id="aviso-stub" role="alert" hidden>
-        <strong>Modo simulado.</strong>
-        Los datos son de prueba (<code>ARPIA_MODE=stub</code>): nada de lo que ves proviene del corpus.
+        <strong data-i18n="aviso.stub.titulo">Modo simulado.</strong>
+        <span data-i18n="aviso.stub.tablero" data-codigo="ARPIA_MODE=stub">Los datos son de prueba (ARPIA_MODE=stub): nada de lo que ves proviene del corpus.</span>
     </div>
 
     <main class="tablero">
@@ -43,78 +43,50 @@
         <!-- IZQUIERDA: asistente -->
         <section class="ia" aria-labelledby="ia-titulo">
 
-            <h2 id="ia-titulo">Asistente Inteligente</h2>
+            <h2 id="ia-titulo" data-i18n="tablero.ia.titulo">Asistente Inteligente</h2>
 
-            <p class="estado" id="estado-ia">● Sistema en línea</p>
+            <p class="estado" id="estado-ia" data-i18n="tablero.ia.enLinea">● Sistema en línea</p>
 
             <div class="respuesta">
                 <h3>IA</h3>
                 <div id="respuesta" aria-live="polite">
-                    <p>Haz una pregunta para comenzar el análisis. Las visualizaciones se actualizan con la respuesta del agente.</p>
+                    <p data-i18n="tablero.ia.inicio">Ingrese su consulta para comenzar. El agente analizará la información solicitada y actualizará el tablero con las visualizaciones y resultados relevantes.</p>
                 </div>
-                <div class="pensando" id="pensando">La IA está analizando los datos...</div>
+                <div class="pensando" id="pensando" data-i18n="tablero.ia.pensando">La IA está analizando los datos...</div>
             </div>
 
             <form class="pregunta" id="form-pregunta" autocomplete="off">
-                <label class="sr-only" for="question">Escribe tu pregunta</label>
-                <input id="question" type="text" maxlength="2000" placeholder="Escribe tu pregunta..." required>
-                <button type="submit" id="enviar">Enviar</button>
+                <label class="sr-only" for="question" data-i18n="tablero.pregunta.label">Escribe tu pregunta</label>
+                <input id="question" type="text" maxlength="2000" placeholder="Escribe tu pregunta..." data-i18n-placeholder="tablero.pregunta.placeholder" required>
+                <button type="submit" id="enviar" data-i18n="tablero.enviar">Enviar</button>
             </form>
 
             <div class="fuente">
-                <h3>Fuente</h3>
+                <h3 data-i18n="tablero.fuente">Fuente</h3>
                 <p>doc_id: <span id="docId">---</span></p>
                 <p>chunk_id: <span id="chunkId">---</span></p>
             </div>
 
         </section>
 
-        <!-- DERECHA: graficos -->
-        <section class="graficos" aria-label="Visualizaciones">
-
-            <article class="grafico" id="panel-tiempo">
-                <div class="grafico-cabeza">
-                    <h3 id="titulo-tiempo">Evolución temporal</h3>
-                    <span class="insignia-panel" data-origen="provisional">Provisional</span>
-                </div>
-                <p class="grafico-nota" id="nota-tiempo"></p>
-                <div class="lienzo"><canvas id="graficoTiempo" role="img" aria-label="Evolución temporal"></canvas></div>
-            </article>
-
-            <article class="grafico" id="panel-mapa">
-                <div class="grafico-cabeza">
-                    <h3>Distribución geográfica</h3>
-                    <span class="insignia-panel" data-origen="provisional">Provisional</span>
-                </div>
-                <p class="grafico-nota" id="nota-mapa"></p>
-                <div id="mapa" role="img" aria-label="Distribución geográfica"></div>
-            </article>
-
-            <article class="grafico" id="panel-eventos">
-                <div class="grafico-cabeza">
-                    <h3 id="titulo-eventos">Distribución de eventos</h3>
-                    <span class="insignia-panel" data-origen="provisional">Provisional</span>
-                </div>
-                <p class="grafico-nota" id="nota-eventos"></p>
-                <div class="lienzo"><canvas id="graficoEventos" role="img" aria-label="Distribución de eventos"></canvas></div>
-            </article>
-
-            <article class="grafico" id="panel-relaciones">
-                <div class="grafico-cabeza">
-                    <h3>Relaciones</h3>
-                    <span class="insignia-panel" data-origen="provisional">Provisional</span>
-                </div>
-                <p class="grafico-nota" id="nota-relaciones"></p>
-                <div class="relaciones">
-                    <div class="nodo centro">Organización</div>
-                    <div class="nodo arriba">País A</div>
-                    <div class="nodo abajo">Empresa B</div>
-                </div>
-            </article>
-
-        </section>
+        <!-- DERECHA: graficos. Los paneles los arma dashboard.js: al cargar,
+             cuatro provisionales; al responder el agente, uno por vista, con
+             el tipo que el agente indique. -->
+        <section class="graficos" id="graficos" aria-label="Visualizaciones" data-i18n-aria="tablero.visualizaciones" aria-live="polite"></section>
 
     </main>
+
+    <!-- vista ampliada de un grafico (boton "Ampliar" de cada panel) -->
+    <dialog class="ampliado" id="ampliado" aria-labelledby="ampliado-titulo">
+        <div class="ampliado-cabeza">
+            <div>
+                <h2 id="ampliado-titulo"></h2>
+                <p class="grafico-nota" id="ampliado-nota"></p>
+            </div>
+            <button type="button" class="boton-icono" id="ampliado-cerrar" aria-label="Cerrar vista ampliada" data-i18n-aria="tablero.cerrar">✕</button>
+        </div>
+        <div class="ampliado-cuerpo" id="ampliado-cuerpo"></div>
+    </dialog>
 
 </body>
 </html>

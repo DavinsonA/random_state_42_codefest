@@ -5,6 +5,7 @@
 // (vector de inyeccion, RETO.md §Defensa) y no debe convertirse en marcado.
 
 import { enviarChat, obtenerSalud } from "./api.js";
+import { conIdioma, mensajeError, montarSelector, t } from "./i18n.js";
 
 const INTERVALO_SALUD_MS = 60000;
 
@@ -15,36 +16,17 @@ const INTERVALO_SALUD_MS = 60000;
 const URL_TABLERO_LOCAL = null;
 const CLAVE_SESION = "arpia.sesion_id";
 
-const NOMBRES_AGENTE = {
-    orquestador: "Orquestador",
-    agente_documental: "Documental",
-    agente_visualizador: "Visualizador",
-    agente_analitico: "Analítico",
-    guardian: "Guardián",
-    memoria: "Memoria",
-};
+/** Objeto cuyos valores se leen del idioma activo en cada acceso (getters). */
+function traducible(prefijo, claves) {
+    const obj = {};
+    for (const k of claves) Object.defineProperty(obj, k, { get: () => t(`${prefijo}.${k}`), enumerable: true });
+    return Object.freeze(obj);
+}
 
-const NOMBRES_CHART = {
-    timeline: "Serie anual",
-    bar: "Barras",
-    stacked_bar: "Barras apiladas",
-    donut: "Composición",
-    table: "Tabla",
-    kpi: "Indicador",
-};
-
-const NOMBRES_GROUP_BY = {
-    fenomeno: "fenómeno",
-    organizacion: "organización",
-    fuente: "fuente",
-    formato: "formato",
-    anio: "año",
-};
-
-const NOMBRES_METRICA = {
-    conteo_documentos: "documentos",
-    conteo_fragmentos: "fragmentos",
-};
+const NOMBRES_AGENTE = traducible("agente", ["orquestador", "agente_documental", "agente_visualizador", "agente_analitico", "guardian", "memoria"]);
+const NOMBRES_CHART = traducible("chart", ["timeline", "bar", "stacked_bar", "donut", "table", "kpi"]);
+const NOMBRES_GROUP_BY = traducible("grupo", ["fenomeno", "organizacion", "fuente", "formato", "anio"]);
+const NOMBRES_METRICA = traducible("metrica", ["conteo_documentos", "conteo_fragmentos"]);
 
 const $ = (id) => document.getElementById(id);
 
@@ -245,7 +227,7 @@ function describirEstado(estado, mode) {
         return mode === "stub"
             ? {
                   tono: "advertencia",
-                  texto: "Simulado",
+                  texto: t("chat.estado.simulado"),
               }
             : null;
     }
@@ -253,7 +235,7 @@ function describirEstado(estado, mode) {
     if (e === "stub") {
         return {
             tono: "advertencia",
-            texto: "Simulado",
+            texto: t("chat.estado.simulado"),
         };
     }
 
@@ -263,28 +245,28 @@ function describirEstado(estado, mode) {
     ) {
         return {
             tono: "info",
-            texto: "Sin consulta",
+            texto: t("chat.estado.sinConsulta"),
         };
     }
 
     if (e.startsWith("rechazado")) {
         return {
             tono: "advertencia",
-            texto: "Fuera de alcance",
+            texto: t("chat.estado.fueraAlcance"),
         };
     }
 
     if (e.startsWith("error_interno")) {
         return {
             tono: "critico",
-            texto: "Error interno",
+            texto: t("chat.estado.errorInterno"),
         };
     }
 
     if (e === "live_no_implementado") {
         return {
             tono: "advertencia",
-            texto: "Modo real no habilitado",
+            texto: t("chat.estado.liveNo"),
         };
     }
 
@@ -302,7 +284,7 @@ function renderMeta(metadata) {
     const agentes = el("ul", "agentes");
     agentes.setAttribute(
         "aria-label",
-        "Agentes invocados"
+        t("chat.agentes")
     );
 
     for (const id of metadata.agentes_invocados || []) {
@@ -357,25 +339,23 @@ function renderMeta(metadata) {
     };
 
     cifra(
-        "interacciones",
+        t("chat.interacciones"),
         formatoNumero.format(
             metadata.num_interacciones || 0
         )
     );
 
     cifra(
-        "tokens",
+        t("chat.tokens"),
         formatoNumero.format(
             tokens.total || 0
         ),
         desglose ||
-            `entrada ${tokens.input || 0} · salida ${
-                tokens.output || 0
-            }`
+            `in ${tokens.input || 0} · out ${tokens.output || 0}`
     );
 
     cifra(
-        "latencia",
+        t("chat.latencia"),
         formatoLatencia(metadata.latencia_ms)
     );
 
@@ -396,11 +376,7 @@ function renderCitas(citas) {
         el(
             "summary",
             null,
-            `Evidencia · ${citas.length} ${
-                citas.length === 1
-                    ? "fragmento"
-                    : "fragmentos"
-            }`
+            t("chat.evidencia", { n: citas.length, unidad: t(citas.length === 1 ? "chat.fragmento" : "chat.fragmentos") })
         )
     );
 
@@ -477,7 +453,12 @@ function renderCitas(citas) {
  * (src/api/routing.py elige el HTML por host).
  */
 function baseTablero() {
-    const { protocol, hostname, port } = window.location;
+    const { protocol, hostname, port, pathname } = window.location;
+
+    // Abierta como archivo (Live Server, file://): el tablero es el archivo vecino.
+    if (pathname.endsWith(".html")) {
+        return URL_TABLERO_LOCAL || new URL("dashboard.html", window.location.href).href;
+    }
 
     if (hostname === "localhost" || hostname === "127.0.0.1") {
         return URL_TABLERO_LOCAL || `${protocol}//dashboard.localhost${port ? `:${port}` : ""}/`;
@@ -493,7 +474,7 @@ function baseTablero() {
 
 /** URL del tablero; con `viewSpec` le pasa la vista en el hash. */
 function urlTablero(viewSpec) {
-    const base = baseTablero();
+    const base = conIdioma(baseTablero());
 
     if (!base) return null;
 
@@ -514,7 +495,7 @@ function renderVista(vs) {
 
     tarjeta.setAttribute(
         "aria-label",
-        "Vista propuesta para el tablero"
+        t("chat.vista.aria")
     );
 
     const cabeza = el(
@@ -526,7 +507,7 @@ function renderVista(vs) {
         el(
             "span",
             "etiqueta",
-            "Vista propuesta"
+            t("chat.vista.propuesta")
         ),
         el(
             "strong",
@@ -557,13 +538,7 @@ function renderVista(vs) {
         el(
             "li",
             null,
-            `conteo de ${
-                NOMBRES_METRICA[
-                    vs.metrica
-                ] ||
-                vs.metrica ||
-                "documentos"
-            }`
+            t("chat.vista.conteo", { metrica: NOMBRES_METRICA[vs.metrica] || vs.metrica || NOMBRES_METRICA.conteo_documentos })
         )
     );
 
@@ -572,11 +547,7 @@ function renderVista(vs) {
             el(
                 "li",
                 null,
-                `por ${
-                    NOMBRES_GROUP_BY[
-                        vs.group_by
-                    ] || vs.group_by
-                }`
+                t("chat.vista.por", { grupo: NOMBRES_GROUP_BY[vs.group_by] || vs.group_by })
             )
         );
     }
@@ -622,7 +593,7 @@ function renderVista(vs) {
             el(
                 "strong",
                 null,
-                "Nota: "
+                t("chat.vista.nota")
             ),
             document.createTextNode(
                 vs.nota
@@ -638,7 +609,7 @@ function renderVista(vs) {
         const enlace = el(
             "a",
             "boton boton-secundario",
-            "Abrir en el tablero"
+            t("chat.vista.abrir")
         );
 
         enlace.href = url;
@@ -671,7 +642,7 @@ function agregarTurnoUsuario(texto) {
         el(
             "span",
             "turno-autor",
-            "Tú"
+            t("chat.tu")
         )
     );
 
@@ -712,7 +683,7 @@ function agregarPendiente() {
         el(
             "p",
             "pendiente",
-            "Consultando agentes y evidencia del corpus…"
+            t("chat.pendiente")
         )
     );
 
@@ -782,7 +753,7 @@ function renderRespuesta(
     renderTexto(
         cuerpo,
         datos.respuesta ||
-            "(respuesta vacía)"
+            t("chat.vacia")
     );
 
     turno.append(cuerpo);
@@ -829,7 +800,7 @@ function renderRespuesta(
         const visualizar = el(
             "button",
             "boton boton-texto",
-            "Visualizar esto"
+            t("chat.visualizar")
         );
 
         visualizar.type = "button";
@@ -882,7 +853,7 @@ function renderFallo(
         el(
             "span",
             "insignia insignia-critico",
-            "Sin respuesta"
+            t("chat.sinRespuesta")
         )
     );
 
@@ -892,8 +863,7 @@ function renderFallo(
         el(
             "p",
             "turno-texto",
-            error.message ||
-                "Ocurrió un error inesperado."
+            mensajeError(error)
         )
     );
 
@@ -905,7 +875,7 @@ function renderFallo(
     const reintentar = el(
         "button",
         "boton boton-texto",
-        "Reintentar"
+        t("chat.reintentar")
     );
 
     reintentar.type = "button";
@@ -1009,25 +979,19 @@ async function refrescarSalud() {
         const salud =
             await obtenerSalud();
 
-        const etiquetas = {
-            ok: "Servicio operativo",
-            degraded:
-                "Servicio degradado",
-            down: "Servicio caído",
-        };
-
         nodo.dataset.estado =
             salud.status || "down";
 
         texto.textContent =
-            etiquetas[salud.status] ||
-            `Estado: ${salud.status}`;
+            ["ok", "degraded", "down"].includes(salud.status)
+                ? t(`salud.${salud.status}`)
+                : t("salud.estado", { estado: salud.status });
 
         nodo.title =
             (salud.warnings || []).join(
                 "\n"
             ) ||
-            "Sin advertencias";
+            t("salud.sinAdvertencias");
 
         marcarModo(
             salud.mode
@@ -1037,10 +1001,10 @@ async function refrescarSalud() {
             "down";
 
         texto.textContent =
-            "Sin conexión";
+            t("salud.sinConexion");
 
         nodo.title =
-            err.message;
+            mensajeError(err);
     }
 }
 
@@ -1143,15 +1107,25 @@ $("nueva-conversacion").addEventListener(
 // -- tablero ------------------------------------------------------------------
 // La direccion se configura en URL_TABLERO_LOCAL / baseTablero(), no aqui.
 
-const tablero = urlTablero(null);
+function actualizarEnlaceTablero() {
+    const tablero = urlTablero(null);
 
-if (tablero) {
-    const enlace =
-        $("enlace-tablero");
+    if (tablero) {
+        const enlace =
+            $("enlace-tablero");
 
-    enlace.href = tablero;
-    enlace.hidden = false;
+        enlace.href = tablero;
+        enlace.hidden = false;
+    }
 }
+
+// Cambio de idioma: i18n.js traduce los textos fijos; aqui se rehace lo
+// generado. Los turnos ya mostrados conservan el idioma en que se pintaron.
+montarSelector($("barra-acciones"), () => {
+    actualizarEnlaceTablero();
+    refrescarSalud();
+});
+actualizarEnlaceTablero();
 
 sesionId();
 
