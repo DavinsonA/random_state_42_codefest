@@ -426,6 +426,10 @@ credenciales nunca van en el código ni en la imagen.
 
 ## 10. Despliegue
 
+> Los requisitos de ADL, los problemas encontrados y **las decisiones aún por tomar**
+> (contenedor único, cómo llega el índice, dónde vive el encoder, rama de despliegue) están
+> en [`DEPLOY.md`](DEPLOY.md). Esta sección es solo el resumen del estado actual.
+
 - **Un solo contenedor, tres dominios.** `agent.*`, `frontagent.*` y `dashboard.*` apuntan
   al mismo servicio; `routing.py` decide qué HTML servir en `/` según el `Host`
   (`dashboard.*` → tablero; cualquier otro → chat).

@@ -7,6 +7,7 @@
 >
 > **Qué está construido y qué falta** (endpoints, contratos, `POST /chat`, guardián,
 > caché, despliegue, pendientes): [`arpia/API.md`](arpia/API.md).
+> **Despliegue en Coolify: requisitos y decisiones por tomar:** [`arpia/DEPLOY.md`](arpia/DEPLOY.md).
 
 ---
 
