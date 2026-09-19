@@ -112,3 +112,41 @@ def test_el_registro_prohibe_filtrar_el_andamiaje():
     fuera contenido."""
     assert "Nunca menciones la estructura interna" in voz.REGISTRO
     assert "documento_recuperado" in voz.REGISTRO
+
+
+# -- ningun prompt define su propio tono ------------------------------------
+
+
+def test_el_verificador_reescribe_con_el_mismo_registro():
+    """Reescribe texto que el usuario lee. Si corrigiera con otro tono
+    desharia lo que gano la redaccion."""
+    from src.agents.verifier import VERIFICACION_PROMPT
+
+    assert voz.REGISTRO in VERIFICACION_PROMPT
+
+
+def test_el_visualizador_usa_el_registro_breve():
+    """Emite `titulo` y `nota`, que el analista lee en el tablero. El registro
+    completo lo confundiria: 'la conclusion va primero' no significa nada en el
+    titulo de un grafico."""
+    from src.agents.executors import VISUALIZADOR_PROMPT
+
+    assert voz.REGISTRO_BREVE in VISUALIZADOR_PROMPT
+    assert voz.REGISTRO not in VISUALIZADOR_PROMPT
+
+
+def test_el_orquestador_no_repite_la_frontera_de_dominio():
+    """El dominio se define una vez. Dos copias divergen en cuanto alguien
+    toque una."""
+    from src.agents.orchestrator import SYSTEM_PROMPT
+
+    assert voz.DOMINIO in SYSTEM_PROMPT
+
+
+@pytest.mark.parametrize("registro", [voz.REGISTRO, voz.REGISTRO_BREVE])
+def test_los_dos_registros_comparten_las_reglas_innegociables(registro):
+    """Neutralidad tecnica y nada de pronosticos valen para todo lo que el
+    sistema emite, sea prosa o una etiqueta."""
+    assert "Neutralidad tecnica" in registro
+    assert "pronosticos" in registro.lower()
+    assert "Tildes y ortografia correctas" in registro

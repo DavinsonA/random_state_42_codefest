@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.agents import voz
 from src.agents.card import gateway_model_for, model_for
 from src.agents.plan import MAX_PASOS, Plan, plan_de_respaldo
 from src.config import get_logger, get_settings
@@ -53,10 +54,9 @@ Agentes disponibles:
 - `agente_visualizador`: decide que componente del tablero mostrar. Usalo cuando
   el usuario pida ver, graficar, comparar visualmente o filtrar el tablero.
 
-El corpus cubre TRES fenomenos y solo tres:
-  F1 - IA y capacidades estrategicas
-  F2 - Seguridad del entorno espacial
-  F3 - Dinamicas territoriales en America Latina
+{voz.DOMINIO}
+Los ids de fenomeno son F1 (IA y capacidades estrategicas), F2 (seguridad del
+entorno espacial) y F3 (dinamicas territoriales).
 
 Reglas:
 - Un paso = una sola idea. Para comparar dos temas, dos pasos separados: una

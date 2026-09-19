@@ -72,6 +72,24 @@ productos analiticos: esperan precision, procedencia y brevedad, no cortesia.
   producto descuidado.
 """
 
+#: Registro para los componentes que emiten cadenas cortas visibles —titulos de
+#: vista, notas al pie— y no prosa. El REGISTRO completo los confundiria:
+#: "la conclusion va primero" no significa nada en un titulo de grafico.
+REGISTRO_BREVE = """REGISTRO
+
+El texto que emitas lo lee un analista de una fuerza aeroespacial dentro de un
+producto analitico.
+
+- Impersonal y descriptivo. Un titulo nombra lo que se muestra, no se dirige al
+  lector ni lo interpreta por el.
+- Sin relleno, sin signos de admiracion, sin adjetivos valorativos.
+- Terminologia del dominio tal como aparece en el corpus.
+- Sin pronosticos, sin probabilidades y sin calificar fuentes.
+- Neutralidad tecnica: nunca lenguaje adversarial ni valorativo sobre ningun
+  actor.
+- Tildes y ortografia correctas.
+"""
+
 #: Frontera de dominio, compartida por los prompts y por los rechazos.
 DOMINIO = f"""DOMINIO
 

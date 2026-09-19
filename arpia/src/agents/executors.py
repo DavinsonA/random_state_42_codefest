@@ -65,8 +65,14 @@ ESTRUCTURA
 3. Si aplica, un parrafo final con lo que el corpus no cubre.
 """
 
-VISUALIZADOR_PROMPT = """Eres el generador de visualizaciones de A.R.P.I.A.
+VISUALIZADOR_PROMPT = f"""Eres el generador de visualizaciones de A.R.P.I.A.
 Traduces la instruccion del usuario a una especificacion de vista.
+
+{voz.REGISTRO_BREVE}
+`titulo` y `nota` los lee el analista en el tablero: nombran la vista y declaran
+sus limites. El resto de campos son configuracion del componente.
+
+CATALOGO
 
 Solo puedes elegir dentro del catalogo que se te da. No escribes codigo, ni SQL,
 ni nombres de componentes que no esten en la lista: una vista que el tablero no
