@@ -508,3 +508,153 @@
     .pagina-tablero .grafico:hover,
     .pagina-tablero .nodo:hover { transform: none; }
 }
+
+
+/* =========================
+   PANTALLA COMPLETA DE PANELES
+   ========================= */
+
+.pagina-tablero .grafico {
+    position: relative;
+}
+
+.boton-pantalla-completa {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 20;
+
+    width: 32px;
+    height: 32px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 0;
+
+    background: rgba(8, 14, 28, 0.85);
+    border: 1px solid var(--arpia-border);
+    border-radius: 7px;
+
+    color: var(--arpia-text);
+    font-size: 18px;
+    cursor: pointer;
+
+    transition: 0.2s ease;
+}
+
+.boton-pantalla-completa:hover {
+    background: var(--arpia-space);
+    border-color: var(--arpia-text);
+}
+
+.pagina-tablero .grafico:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    padding: 24px;
+
+    border-radius: 0;
+    background: var(--arpia-void);
+
+    display: flex;
+    flex-direction: column;
+}
+
+.pagina-tablero .grafico:fullscreen canvas {
+    flex: 1;
+    min-height: 0;
+}
+
+.pagina-tablero .grafico:fullscreen #mapa {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+}
+
+.pagina-tablero .grafico:fullscreen .relaciones {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+}
+
+/* =========================
+   BOTÓN PANTALLA COMPLETA
+   ========================= */
+
+.pagina-tablero .grafico {
+    position: relative;
+}
+
+.boton-fullscreen {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 100;
+
+    width: 32px;
+    height: 32px;
+
+    padding: 0;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border: 1px solid var(--t-borde);
+    border-radius: 7px;
+
+    background: rgba(5, 10, 20, 0.85);
+    color: var(--arpia-text);
+
+    font-size: 18px;
+    cursor: pointer;
+}
+
+.boton-fullscreen:hover {
+    background: var(--arpia-space);
+    color: var(--arpia-bg);
+}
+
+/* CUADRO EN PANTALLA COMPLETA */
+
+.pagina-tablero .grafico.en-pantalla-completa {
+    position: fixed !important;
+    inset: 0 !important;
+
+    width: 100vw !important;
+    height: 100vh !important;
+
+    margin: 0 !important;
+    padding: 25px !important;
+
+    z-index: 99999 !important;
+
+    border-radius: 0 !important;
+
+    background: var(--arpia-void) !important;
+
+    transform: none !important;
+}
+
+/* El gráfico ocupa todo el espacio disponible */
+
+.pagina-tablero .grafico.en-pantalla-completa .lienzo {
+    height: calc(100vh - 130px) !important;
+}
+
+.pagina-tablero .grafico.en-pantalla-completa #mapa {
+    height: calc(100vh - 130px) !important;
+}
+
+.pagina-tablero .grafico.en-pantalla-completa .relaciones {
+    height: calc(100vh - 130px) !important;
+}
+
+/* canvas de Chart.js */
+
+.pagina-tablero .grafico.en-pantalla-completa canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
