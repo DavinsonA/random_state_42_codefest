@@ -249,6 +249,44 @@ class CacheSemantico:
 cache = CacheSemantico()
 
 
+#: Vueltas previas (pregunta + respuesta) que ven los agentes para entender un
+#: seguimiento, y tope de caracteres por mensaje. Acotado a proposito: cada
+#: caracter va en el prompt del orquestador y del redactor en cada seguimiento.
+VUELTAS_PARA_AGENTES = 2
+MAX_CHARS_MENSAJE = 400
+
+
+def conversacion_previa(
+    mensajes: list[Any],
+    pregunta: str,
+    vueltas: int = VUELTAS_PARA_AGENTES,
+    max_chars: int = MAX_CHARS_MENSAJE,
+) -> str:
+    """Texto con las ultimas vueltas de la conversacion, o "" si no hay.
+
+    Sirve para que el orquestador y el redactor entiendan un seguimiento ("y en
+    2023?", "resumelo") sin que el turno 1 de una sesion cueste un token mas.
+    Excluye la pregunta actual (el ultimo `HumanMessage` si coincide) y todo lo
+    que no sea texto de usuario o de asistente, como los mensajes de tools.
+    """
+    previos = list(mensajes or [])
+    if previos and getattr(previos[-1], "type", "") == "human" and previos[-1].content == pregunta:
+        previos = previos[:-1]
+
+    lineas: list[tuple[str, str]] = []
+    for m in previos:
+        tipo = getattr(m, "type", "")
+        texto = str(getattr(m, "content", "") or "").strip()
+        if texto and tipo in ("human", "ai") and not getattr(m, "tool_calls", None):
+            rol = "Usuario" if tipo == "human" else "Asistente"
+            if len(texto) > max_chars:
+                texto = texto[:max_chars].rstrip() + "…"
+            lineas.append((rol, texto))
+
+    lineas = lineas[-(vueltas * 2) :]
+    return "\n".join(f"{rol}: {texto}" for rol, texto in lineas)
+
+
 def ventana_historial(mensajes: list[Any], turnos: int = VENTANA_TURNOS) -> list[Any]:
     """Recorta el historial a los ultimos `turnos` intercambios.
 

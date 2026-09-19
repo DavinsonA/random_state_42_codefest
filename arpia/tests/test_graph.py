@@ -44,6 +44,8 @@ class FakeLLM:
         self.plan_fijo = plan
         self.texto = texto
         self.llamadas: list[str] = []
+        self.mensajes_plan: list[list[dict]] = []
+        self.mensajes_redaccion: list[list[dict]] = []
         self.fallar_plan = False
         self.fallar_redaccion = False
         self.spec = None  # se construye perezosamente para no importar arriba
@@ -69,6 +71,7 @@ class FakeLLM:
 
     def _plan(self, mensajes):
         self.llamadas.append("plan")
+        self.mensajes_plan.append(mensajes)
         if self.fallar_plan:
             raise RuntimeError("gateway caido")
         plan = self.plan_fijo or Plan(
@@ -91,6 +94,7 @@ class FakeLLM:
     # -- redaccion -------------------------------------------------------
     def invoke(self, mensajes):
         self.llamadas.append("redaccion")
+        self.mensajes_redaccion.append(mensajes)
         if self.fallar_redaccion:
             raise RuntimeError("gateway caido")
         return SimpleNamespace(
@@ -407,6 +411,76 @@ def test_dos_sesiones_no_comparten_historial(entorno):
     out = g.invoke({"question": "de la sesion B"}, _config("hilo-B"))
     humanos = [m.content for m in out["messages"] if getattr(m, "type", "") == "human"]
     assert humanos == ["de la sesion B"]
+
+
+# -- conversacion: los agentes entienden un seguimiento ----------------------
+
+
+def _usuario(mensajes) -> str:
+    return next(m["content"] for m in reversed(mensajes) if m["role"] == "user")
+
+
+def test_el_primer_turno_de_una_sesion_no_paga_historial(entorno):
+    """Sin conversacion previa el prompt es identico al de antes: 0 tokens extra."""
+    g, llm, _ = entorno()
+    g.invoke({"question": "capacidades antisatelite"}, _config("h-primero"))
+    assert "Conversacion previa" not in _usuario(llm.mensajes_plan[0])
+    assert "Conversacion previa" not in _usuario(llm.mensajes_redaccion[0])
+
+
+def test_un_seguimiento_ve_la_conversacion_en_el_orquestador_y_en_el_redactor(entorno):
+    g, llm, _ = entorno()
+    g.invoke({"question": "capacidades antisatelite"}, _config("h-seg"))
+    g.invoke({"question": "resumelo en una frase"}, _config("h-seg"))
+
+    plan = _usuario(llm.mensajes_plan[-1])
+    assert plan.splitlines()[0] == "resumelo en una frase"  # la pregunta sigue primero
+    assert "Usuario: capacidades antisatelite" in plan
+    assert "Asistente: Segun el documento F1-DOC-0" in plan
+    assert "AUTONOMA" in plan
+
+    redaccion = _usuario(llm.mensajes_redaccion[-1])
+    assert "Usuario: capacidades antisatelite" in redaccion
+    assert "Pregunta: resumelo en una frase" in redaccion
+
+
+def test_la_conversacion_no_cruza_de_sesion(entorno):
+    g, llm, _ = entorno()
+    g.invoke({"question": "tema de la sesion A"}, _config("h-A"))
+    g.invoke({"question": "otra pregunta"}, _config("h-B"))
+    assert "Conversacion previa" not in _usuario(llm.mensajes_plan[-1])
+
+
+def test_conversacion_previa_excluye_la_pregunta_actual_y_acota_el_tamano():
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from src.agents.memory import MAX_CHARS_MENSAJE, conversacion_previa
+
+    mensajes = [
+        HumanMessage(content="vieja 1"),
+        AIMessage(content="resp vieja 1"),
+        HumanMessage(content="vieja 2"),
+        AIMessage(content="resp vieja 2"),
+        ToolMessage(content="ruido de tool", tool_call_id="t1"),
+        HumanMessage(content="reciente"),
+        AIMessage(content="x" * (MAX_CHARS_MENSAJE * 3)),
+        HumanMessage(content="pregunta actual"),
+    ]
+    texto = conversacion_previa(mensajes, "pregunta actual")
+    assert "pregunta actual" not in texto
+    assert "ruido de tool" not in texto
+    assert "vieja 1" not in texto, "solo las ultimas 2 vueltas"
+    assert "Usuario: reciente" in texto
+    assert all(len(linea) <= MAX_CHARS_MENSAJE + 20 for linea in texto.splitlines())
+    assert conversacion_previa([HumanMessage(content="a")], "a") == ""
+    assert conversacion_previa([], "a") == ""
+
+
+def test_la_replanificacion_conserva_la_conversacion():
+    from src.agents.orchestrator import _mensajes
+
+    contenido = _usuario(_mensajes("q", "sin evidencia", ["q0"], "Usuario: antes"))
+    assert "Usuario: antes" in contenido and "sin evidencia" in contenido
 
 
 # -- plan --------------------------------------------------------------------

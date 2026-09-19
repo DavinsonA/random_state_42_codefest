@@ -253,25 +253,38 @@ def _sobre(e: dict[str, Any]) -> str:
     )
 
 
-def redactar(pregunta: str, evidencia: list[dict[str, Any]]) -> str:
+def redactar(pregunta: str, evidencia: list[dict[str, Any]], conversacion: str = "") -> str:
     """Redacta la respuesta a partir de la evidencia. UNA llamada al modelo.
 
     Separada del ejecutor a proposito: se invoca una sola vez por turno, con la
     evidencia ya consolidada y deduplicada. Nunca lanza — si el gateway falla,
     devuelve los fragmentos con su procedencia, que siguen siendo evidencia
     util; una disculpa generica no puntua en relevancia.
+
+    `conversacion` (vacia en el primer turno) solo aclara a que se refiere un
+    seguimiento y que formato pide ("en una frase"); los hechos salen de la
+    evidencia.
     """
 
     if not evidencia:
         return ""
 
     sobres = "\n\n".join(_sobre(e) for e in evidencia[:TOP_K])
+    previa = (
+        "Conversacion previa (solo para entender a que se refiere la pregunta y que "
+        f"formato pide; los hechos salen unicamente de la evidencia):\n{conversacion}\n\n"
+        if conversacion
+        else ""
+    )
     with tracing.span("llm", "documental.redactar", input=pregunta[:300]) as sp:
         try:
             respuesta = _llm(AGENTE_DOCUMENTAL).invoke(
                 [
                     {"role": "system", "content": REDACCION_PROMPT},
-                    {"role": "user", "content": f"Pregunta: {pregunta}\n\nEvidencia:\n{sobres}"},
+                    {
+                        "role": "user",
+                        "content": f"{previa}Pregunta: {pregunta}\n\nEvidencia:\n{sobres}",
+                    },
                 ]
             )
             usage.record_usage(

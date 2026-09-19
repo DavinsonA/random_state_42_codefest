@@ -7,7 +7,7 @@
 > **Base:** `main` @ `c92029b` + el commit de trazabilidad de conteos (sección 1). Lo que ya cerraste en
 > `cfa7c79` y `adea37f` está en la sección 2.1.
 >
-> Las 319 pruebas de la suite pasan, pero **casi todas usan modelos falsos**: por eso
+> Las 337 pruebas de la suite pasan, pero **casi todas usan modelos falsos**: por eso
 > nada de lo que sigue lo detectaba. Cada hallazgo trae evidencia, propuesta de arreglo
 > y cómo comprobarlo. Detalle general del sistema en [`API.md`](API.md); decisiones de
 > despliegue en [`DEPLOY.md`](DEPLOY.md).
@@ -78,7 +78,7 @@ fallan si se reinstala tu verificador anterior o si se quitan las citas.
 |---|---|---|---|
 | 1 | ✅ **Resuelto** (ver 2.1) | El orquestador fallaba con la clave `Pasos`; ahora 6 de 6 llamadas válidas con el modelo real | `plan.py`, `executors.py` |
 | 2 | ✅ **Resuelto** (ver 2.1) | El caché semántico guardaba como buena la respuesta del plan de respaldo | `chat.py`, `turnlog.py`, `orchestrator.py` |
-| 3 | P1 | Ningún agente lee la conversación | `graph.py`, `orchestrator.py`, `executors.py` |
+| 3 | ✅ **Resuelto** (ver 2.1) | Ningún agente leía la conversación | `graph.py`, `orchestrator.py`, `executors.py`, `memory.py` |
 
 ### 1. ✅ RESUELTO: el orquestador fallaba porque el modelo devolvía la clave `Pasos`
 
@@ -156,7 +156,9 @@ documentos hay por fenómeno?" quedó en el caché de ese proceso.
 **Propuesta.** No cachear turnos cuyo plan fue de respaldo. Por ejemplo, que `planificar`
 deje una marca en `turnlog` y `run_chat` la lea, o un estado propio (`ok:respaldo`).
 
-### 3. Ningún agente lee la conversación (P1)
+### 3. ✅ RESUELTO: ningún agente leía la conversación
+
+> **Estado:** corregido (ver 2.1). Lo de abajo queda como registro del diagnóstico.
 
 **Qué pasa.** El historial se guarda en SQLite (`memoria_persistente: true`) pero
 `orchestrator.planificar(pregunta, …)` y `executors.redactar(pregunta, evidencia)` solo reciben
@@ -221,7 +223,33 @@ Se siguió la primera propuesta: una marca en `turnlog`, sin cambiar el `estado`
 - Efecto: un fallo transitorio del modelo ya no se congela; repetir la pregunta vuelve a ejecutar el turno.
 - 4 pruebas nuevas (332 en total). Comprobé con un mutante que la de `test_chat.py` falla si se quita el
   cambio de `chat.py`.
-- **Sigue abierto el hallazgo 3:** ningún agente lee la conversación.
+
+### Hallazgo 3 (los agentes no leían la conversación), cerrado en esta sesión
+
+Se siguió la propuesta: pasar las últimas vueltas al orquestador y al redactor. Cambia firmas, así que
+conviene que lo revises.
+
+- `memory.py`: `conversacion_previa(mensajes, pregunta)` arma las últimas 2 vueltas como texto
+  (`Usuario: …` / `Asistente: …`), con tope de 400 caracteres por mensaje. Excluye la pregunta actual y
+  los mensajes de herramientas. Devuelve `""` si no hay conversación.
+- `orchestrator.py`: `planificar(…, conversacion="")`. Solo si hay conversación, añade bajo la pregunta un
+  bloque que pide reescribir cada `consulta` como autónoma (sin pronombres) si la pregunta es un
+  seguimiento, y dejarla igual si se entiende sola. La pregunta sigue siendo la primera línea.
+- `executors.py`: `redactar(…, conversacion="")`, con el mismo criterio: solo aclara la referencia y el
+  formato; los hechos salen de la evidencia.
+- `graph.py`: `planificar` y `componer` leen `state["messages"]` y lo pasan.
+- **Costo:** el primer turno de una sesión no cambia (cero tokens extra), así que la evaluación de ADL,
+  que manda preguntas sueltas, no se ve afectada. Solo los seguimientos pagan el bloque.
+- **Medido con el modelo real** (misma sesión): tras "¿Qué reporta el corpus sobre capacidades
+  antisatélite?", "Resúmelo en una sola frase" buscó "Resumen en una sola frase del corpus sobre
+  capacidades antisatélite" y respondió sobre el tema correcto, con 2 llamadas y 4.909 tokens. Antes: 3
+  llamadas, 4.442 tokens y documentos de IA sin relación.
+- **Límite conocido:** el redactor sigue su estructura fija (conclusión, desarrollo, lo no cubierto) y
+  no reduce la respuesta a una sola frase aunque se lo pidan. Es una decisión de `voz.py`/`REDACCION_PROMPT`.
+- 5 pruebas nuevas (337 en total): primer turno sin historial, seguimiento con historial en ambos agentes,
+  sin cruce entre sesiones, recorte y filtrado, y replanificación que conserva la conversación.
+
+Ya no queda ningún hallazgo abierto de esta lista.
 
 ---
 
@@ -241,6 +269,7 @@ Se siguió la primera propuesta: una marca en `turnlog`, sin cambiar el `estado`
 > todo en `arpia/PENDIENTES_AGENTES.md`. (1) El orquestador fallaba porque `gpt-oss-120b` devolvía `Pasos`
 > y `Plan` la rechazaba; ya lo corregí en `plan.py` y `executors.py` (sección 2.1) y lo puedes revisar.
 > El caché que guardaba como buena una respuesta de respaldo también quedó cerrado (marca en `turnlog`,
-> 2 líneas en `planificar`). Lo que queda es el hallazgo 3 (ningún agente lee la conversación). También
+> 2 líneas en `planificar`), y también que los agentes lean la conversación (`memory.conversacion_previa`;
+> cambia las firmas de `planificar` y `redactar`, sin costo en el primer turno de una sesión). También
 > toqué `analitico` y `verifier.py` para que las cifras citen documentos reales; la sección 1
 > explica por qué y qué necesito que valides.

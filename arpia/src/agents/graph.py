@@ -33,7 +33,7 @@ from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langgraph.graph import END, START, StateGraph
 
 from src.agents import budget, executors, orchestrator, verifier, voz
-from src.agents.memory import VENTANA_TURNOS
+from src.agents.memory import VENTANA_TURNOS, conversacion_previa
 from src.agents.plan import MAX_REPLANES, Paso, Plan
 from src.agents.state import TURNO_LIMPIO, AgentState
 from src.config import get_logger
@@ -88,7 +88,12 @@ def planificar(state: AgentState) -> dict[str, Any]:
         motivo = "ningun fragmento supero el umbral de similitud"
         intentadas = [p.get("consulta", "") for p in state.get("plan", {}).get("pasos", [])]
 
-    plan = orchestrator.planificar(state["question"], motivo=motivo, intentadas=intentadas)
+    plan = orchestrator.planificar(
+        state["question"],
+        motivo=motivo,
+        intentadas=intentadas,
+        conversacion=conversacion_previa(state.get("messages") or [], state["question"]),
+    )
     return {"plan": plan.model_dump(), "replans": replans}
 
 
@@ -187,7 +192,9 @@ def componer(state: AgentState) -> dict[str, Any]:
     if documental:
         if budget.alcanza():
             findings[executors.AGENTE_DOCUMENTAL] = executors.redactar(
-                state["question"], documental
+                state["question"],
+                documental,
+                conversacion_previa(state.get("messages") or [], state["question"]),
             )
         else:
             log.warning("presupuesto de tiempo agotado; se entrega la evidencia sin redactar")
