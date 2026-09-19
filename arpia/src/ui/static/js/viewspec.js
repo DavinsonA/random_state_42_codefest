@@ -3,7 +3,7 @@
 // El ViewSpec es un esquema cerrado: aqui solo se acepta el mismo vocabulario.
 // Lo que no se reconozca se descarta, nunca se interpreta.
 
-import { ApiError, obtenerAgregado, obtenerVista } from "./api.js";
+import { ApiError, obtenerVista } from "./api.js";
 import { mensajeError, t } from "./i18n.js";
 
 /** Objeto cuyos valores se leen del idioma activo en cada acceso (getters). */
@@ -170,48 +170,49 @@ export function mensajeIndice(motivo) {
     return m ? t("error.sinDatosMotivo", { motivo: m }) : t("error.datos");
 }
 
-/** Une las coberturas de varias peticiones (una por fenomeno) en una sola.
- *
- * `con_dato` son los documentos que SI declaran la dimension y `total` los que
- * la podian declarar. Solo tiene sentido para el ano: en las demas dimensiones
- * todos los documentos tienen dato y mostrar "100 % tienen año" seria falso.
- */
-function unirCobertura(respuestas, dimension) {
-    if (dimension !== "anio") return null;
-    let total = 0;
-    let conDato = 0;
-    for (const r of respuestas) {
-        const c = r.cobertura;
-        if (!c) continue;
-        total += Number(c.documentos_en_dimension) || 0;
-        conDato += (Number(c.documentos_en_dimension) || 0) - (Number(c.sin_dato_en_la_dimension) || 0);
-    }
-    return total ? { con_dato: conDato, total } : null;
-}
-
 /**
- * Vista con dos dimensiones (`serie_por`): la cruza el servidor, que devuelve categorias x series.
- * Cada fila lleva su `serie`; `fenomeno` solo cuando la serie ES un fenomeno.
+ * Carga los datos de una vista.
+ * Devuelve { datos } o { error } con un mensaje legible; nunca lanza.
+ *
+ * Una sola llamada a `POST /api/view`: el servidor resuelve el `ViewSpec` (mismo esquema cerrado
+ * que el visualizador), cruza las dimensiones y devuelve categorias x series con su cobertura.
+ * Antes la GUI pedia `/api/aggregate` una vez por fenomeno y armaba las series por su cuenta:
+ * una copia del criterio del servidor en otro lenguaje. Cada fila lleva su `serie`; `fenomeno`
+ * solo cuando la categoria o la serie ES un fenomeno.
  */
-async function cargarCruce(spec, { modoStub }) {
+export async function cargar(spec, { modoStub = false } = {}) {
     try {
         const r = await obtenerVista(spec);
         if (r.disponible === false) {
             if (modoStub) return { datos: datosSimulados({ ...spec, serie_por: null }) };
             return { error: mensajeIndice(r.motivo) };
         }
+        const porFenomeno = r.group_by === "fenomeno";
         const filas = (r.series || []).flatMap((s) =>
             (r.categorias || []).map((c, i) => ({
                 grupo: String(c),
                 serie: String(s.clave),
-                fenomeno: r.serie_por === "fenomeno" && FENS.includes(s.clave) ? s.clave : null,
+                fenomeno: porFenomeno ? (FENS.includes(c) ? c : null) : r.serie_por === "fenomeno" && FENS.includes(s.clave) ? s.clave : null,
                 valor: Number(s.valores?.[i]) || 0,
                 doc_ids: Array.isArray(s.doc_ids?.[i]) ? s.doc_ids[i].map(String) : [],
             })),
         ).filter((f) => f.valor > 0);
+
+        // `con_dato` son los documentos que SI declaran la dimension y `total` los que la podian
+        // declarar. Solo tiene sentido para el ano: en las demas todos tienen dato y mostrar
+        // "100 % tienen ano" seria falso. Ese caso ya lo dice la cobertura, no el aviso.
+        const temporal = r.group_by === "anio";
+        const enDimension = Number(r.cobertura?.documentos_en_dimension) || 0;
+        const sinDato = Number(r.cobertura?.sin_dato_en_la_dimension) || 0;
         return {
-            // El aviso del servidor ya incluye la nota de la vista: no se dice dos veces.
-            datos: { filas, total: Number(r.total) || 0, cobertura: null, nota: (r.aviso || "").replace(spec.nota || " ", "").trim(), simulado: false },
+            datos: {
+                filas,
+                total: Number(r.total) || 0,
+                cobertura: temporal && enDimension ? { con_dato: enDimension - sinDato, total: enDimension } : null,
+                // El aviso del servidor ya incluye la nota de la vista: no se dice dos veces.
+                nota: temporal ? "" : (r.aviso || "").replace(spec.nota || "\0", "").trim(),
+                simulado: false,
+            },
         };
     } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
@@ -221,58 +222,3 @@ async function cargarCruce(spec, { modoStub }) {
         return { error: err instanceof ApiError ? mensajeError(err) : t("error.datos") };
     }
 }
-
-/**
- * Carga los datos de una vista.
- * Devuelve { datos } o { error } con un mensaje legible; nunca lanza.
- *
- * El backend responde `{ clave, valor, doc_ids }` sin fenomeno. Los graficos
- * apilan y colorean por fenomeno, asi que, salvo cuando la dimension ES el
- * fenomeno, se pide una vez por fenomeno y cada fila lo hereda de su peticion.
- */
-export async function cargar(spec, { modoStub = false } = {}) {
-    if (spec.serie_por) return cargarCruce(spec, { modoStub });
-    try {
-        const dimension = spec.group_by || "fenomeno";
-        const fenomenos = spec.fenomenos.length ? spec.fenomenos : FENS;
-        const peticiones =
-            dimension === "fenomeno"
-                ? [obtenerAgregado({ ...spec, group_by: "fenomeno" })]
-                : fenomenos.map((f) => obtenerAgregado({ ...spec, group_by: dimension, fenomenos: [f] }));
-
-        const respuestas = await Promise.all(peticiones);
-        const caida = respuestas.find((r) => r.disponible === false);
-        if (caida) {
-            if (modoStub) return { datos: datosSimulados(spec) };
-            return { error: mensajeIndice(caida.motivo) };
-        }
-
-        const filas = respuestas.flatMap((r, i) =>
-            (r.filas || []).map((f) => {
-                const clave = f.clave === null || f.clave === undefined ? "" : String(f.clave);
-                return {
-                    grupo: clave,
-                    fenomeno: dimension === "fenomeno" ? (FENS.includes(clave) ? clave : null) : fenomenos[i],
-                    valor: Number(f.valor) || 0,
-                    doc_ids: Array.isArray(f.doc_ids) ? f.doc_ids.map(String) : [],
-                };
-            }),
-        );
-        return {
-            datos: {
-                filas,
-                total: filas.reduce((s, f) => s + f.valor, 0),
-                cobertura: unirCobertura(respuestas, dimension),
-                nota: "",
-                simulado: false,
-            },
-        };
-    } catch (err) {
-        if (err instanceof ApiError && err.status === 404) {
-            if (modoStub) return { datos: datosSimulados(spec) };
-            return { error: t("error.sin_datos_tablero") };
-        }
-        return { error: err instanceof ApiError ? mensajeError(err) : t("error.datos") };
-    }
-}
-

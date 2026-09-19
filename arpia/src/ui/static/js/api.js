@@ -132,27 +132,6 @@ export function obtenerGeo() {
     return pedir("/api/geo");
 }
 
-/** GET /api/aggregate — datos de una vista del tablero. Responde 200 siempre.
- *
- * Forma real del backend (src/api/dashboard.py):
- *   { disponible, group_by, metrica, total,
- *     filas: [{ clave, valor, doc_ids: [...] }],
- *     cobertura: { documentos_universo, documentos_en_dimension, documentos_contados,
- *                  sin_dato_en_la_dimension, excluidos_por_fecha } }
- * o `{ disponible: false, motivo }` si el indice no esta. Ninguna fila trae el
- * fenomeno: quien lo necesite pide una vez por fenomeno (`fenomenos`).
- * `viewspec.js` traduce esta forma a la que usan los graficos.
- */
-export function obtenerAgregado({ metrica, group_by, fenomenos, desde, hasta }) {
-    const q = new URLSearchParams();
-    if (metrica) q.set("metrica", metrica);
-    if (group_by) q.set("group_by", group_by);
-    if (fenomenos && fenomenos.length) q.set("fenomenos", fenomenos.join(","));
-    if (desde) q.set("desde", desde);
-    if (hasta) q.set("hasta", hasta);
-    return pedir(`/api/aggregate?${q.toString()}`);
-}
-
 /** POST /api/view — la vista lista para pintar (categorias x series, ya cruzadas en el servidor). */
 export function obtenerVista(spec) {
     return pedir("/api/view", { method: "POST", body: spec, timeoutMs: 20000 });
