@@ -1,12 +1,33 @@
+# Todo lo que NO debe entrar en la imagen. El Dockerfile hace `COPY . .`, asi
+# que este archivo es la unica frontera: lo que no este aqui, se despliega.
 .git
+.gitignore
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.ropeproject
 tests/
+lab/
+
+# OJO: `docs/` NO se excluye. `src/theme/tokens.py` lee
+# `docs/design/design-tokens.json` en tiempo de ejecucion (AGENTS.md §2):
+# sin esa carpeta la imagen arranca y el tema revienta al primer uso.
+
+# Datos e indices: se montan como volumen, nunca se hornean en la imagen.
 data/
 *.faiss
 *.jsonl
+
+# Secretos: jamas.
 .env
+.env.*
+!.env.example
 .streamlit/secrets.toml
+
+# Artefactos de build y estado local
+uv.lock
+*.sqlite
+*.sqlite3
+*.db

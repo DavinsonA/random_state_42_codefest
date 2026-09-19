@@ -1,26 +1,33 @@
+# Un solo servicio: la API sirve tambien el chat y el tablero estaticos,
+# enrutados por `Host` (ver src/api/routing.py). Los tres dominios del reto
+# —agent.*, frontagent.* y dashboard.*— apuntan a este mismo contenedor.
 services:
   api:
     build: .
     ports: ["8000:8000"]
-    # .env es opcional: sin el, ARPIA_MODE cae a "stub" (ver .env.example) y
-    # la API arranca igual. Esto es lo que permite desplegar antes de tener
+    # .env es opcional: sin el, ARPIA_MODE cae a "stub" (ver .env.example) y la
+    # API arranca igual. Esto es lo que permite desplegar antes de tener
     # credenciales o corpus.
     env_file:
       - path: .env
         required: false
-    volumes: ["./data:/app/data:ro"]
+    environment:
+      # El encoder bge-m3 se descarga en esta ruta. Sin el volumen de abajo,
+      # CADA despliegue vuelve a bajar 2,2 GB y tarda minutos.
+      HF_HOME: /app/.cache/huggingface
+    volumes:
+      # ./data puede no existir: docker lo crea vacio y la API arranca degradada
+      # en vez de fallar.
+      - ./data:/app/data:ro
+      - hf-cache:/app/.cache/huggingface
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx;httpx.get('http://localhost:8000/health')"]
       interval: 30s
       timeout: 5s
+      # El encoder tarda ~90 s en cargar, pero /health responde antes: el
+      # servicio esta vivo y degradado, que es informacion util, no un fallo.
+      start_period: 30s
       retries: 3
 
-  ui:
-    build: .
-    command: streamlit run src/ui/app.py --server.port 8501 --server.address 0.0.0.0
-    ports: ["8501:8501"]
-    env_file:
-      - path: .env
-        required: false
-    volumes: ["./data:/app/data:ro"]
-    depends_on: [api]
+volumes:
+  hf-cache:
