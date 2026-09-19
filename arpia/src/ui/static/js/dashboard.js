@@ -30,6 +30,7 @@ import {
 } from "./viewspec.js";
 import { conIdioma, mensajeError, montarSelector, t } from "./i18n.js";
 import { abrirVisor, enlazarReferencias } from "./referencias.js";
+import { conTransicion, paginaLista, suavizarEnlace } from "./transiciones.js";
 
 const $ = (id) => document.getElementById(id);
 const fmt = new Intl.NumberFormat("es-CO");
@@ -58,6 +59,11 @@ Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
 Chart.defaults.maintainAspectRatio = false;
 Chart.defaults.plugins.legend.labels.boxWidth = 10;
 
+// Animacion de los graficos: corta y con salida suave. Si el sistema pide
+// reducir movimiento, no se anima.
+const REDUCIR_MOVIMIENTO = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+Chart.defaults.animation = REDUCIR_MOVIMIENTO ? false : { duration: 650, easing: "easeOutQuart" };
+
 // =============================================================================
 // RENDERIZADORES: cada uno dibuja en `cont` y devuelve su funcion de limpieza
 // =============================================================================
@@ -77,34 +83,80 @@ function grafico(cont, etiqueta, config) {
     return () => chart.destroy();
 }
 
-/** Serie por ano, una linea por fenomeno. `series`: [{ label, color, valores, meta }] */
-function dibujarLinea(cont, { etiqueta, labels, series }) {
-    return grafico(cont, etiqueta, {
-        type: "line",
+/** Tipos de la serie temporal que el usuario puede alternar debajo del grafico. */
+const TIPOS_SERIE = ["linea", "columnas", "barras"];
+
+function configSerie(tipo, { labels, series }) {
+    const esLinea = tipo === "linea";
+    const horizontal = tipo === "barras";
+    const ejeValor = { beginAtZero: true, ticks: { precision: 0 } };
+    return {
+        type: esLinea ? "line" : "bar",
         data: {
             labels,
-            datasets: series.map((s) => ({
-                label: s.label,
-                data: s.valores,
-                borderColor: s.color,
-                backgroundColor: s.color,
-                pointBackgroundColor: tok("text"),
-                pointBorderColor: s.color,
-                pointRadius: 3,
-                pointHoverRadius: 5,
-                borderWidth: 2,
-                tension: 0.3,
-                // monotona: la curva no pasa por valores que los datos no tienen
-                cubicInterpolationMode: "monotone",
-            })),
+            datasets: series.map((s) => (esLinea
+                ? {
+                    label: s.label,
+                    data: s.valores,
+                    borderColor: s.color,
+                    backgroundColor: s.color,
+                    pointBackgroundColor: tok("text"),
+                    pointBorderColor: s.color,
+                    pointRadius: 3,
+                    pointHoverRadius: 5,
+                    borderWidth: 2,
+                    tension: 0.3,
+                    // monotona: la curva no pasa por valores que los datos no tienen
+                    cubicInterpolationMode: "monotone",
+                }
+                : { label: s.label, data: s.valores, backgroundColor: s.color, borderRadius: 3 })),
         },
         options: {
-            interaction: { mode: "nearest", intersect: true },
+            indexAxis: horizontal ? "y" : "x",
+            // Al pasar el mouse: el tooltip muestra el ano y el valor de cada serie.
+            interaction: esLinea ? { mode: "nearest", intersect: true } : { mode: "index", intersect: false },
             plugins: { legend: { display: series.length > 1, position: "bottom" } },
-            scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+            scales: horizontal ? { x: ejeValor } : { y: ejeValor },
             onClick: (_ev, e) => e[0] && series[e[0].datasetIndex].meta?.[e[0].index] && mostrarDocs(series[e[0].datasetIndex].meta[e[0].index]),
         },
+    };
+}
+
+/**
+ * Serie por ano, una serie por fenomeno, con botones debajo para verla como
+ * linea, columnas o barras. `memoria.tipo` guarda la eleccion del panel para
+ * que la vista ampliada abra con el mismo tipo.
+ * `series`: [{ label, color, valores, meta }]
+ */
+function dibujarSerie(cont, { etiqueta, labels, series, memoria = { tipo: "linea" } }) {
+    const canvas = lienzo(cont, etiqueta);
+    let chart = null;
+
+    // Los botones se insertan ANTES de crear el grafico: asi Chart.js mide el
+    // espacio que de verdad le queda. Si se crea primero (vista ampliada), el
+    // canvas toma todo el alto y queda encima de los botones, tapando el clic.
+    const grupo = el("div", "selector-grafico");
+    grupo.setAttribute("role", "group");
+    grupo.setAttribute("aria-label", t("serie.tipo"));
+    const botones = TIPOS_SERIE.map((tipo) => {
+        const b = el("button", "tipo-grafico", t(`serie.${tipo}`));
+        b.type = "button";
+        b.dataset.tipo = tipo;
+        b.setAttribute("aria-pressed", String(tipo === memoria.tipo));
+        b.addEventListener("click", () => {
+            if (tipo === memoria.tipo) return;
+            memoria.tipo = tipo;
+            chart?.destroy();
+            chart = new Chart(canvas, configSerie(tipo, { labels, series }));
+            botones.forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.tipo === tipo)));
+        });
+        return b;
     });
+    grupo.append(...botones);
+    cont.append(grupo);
+
+    chart = new Chart(canvas, configSerie(memoria.tipo, { labels, series }));
+    return () => chart?.destroy();
 }
 
 /** Composicion. `partes`: [{ label, valor, color, meta }] */
@@ -313,7 +365,8 @@ function dibujanteDe(spec, filas, total) {
                     meta: anios.map((a) => ({ titulo: `${a} · ${fen}`, doc_ids: m.get(a)?.doc_ids || [] })),
                 };
             });
-            return (c) => dibujarLinea(c, { etiqueta, labels: anios, series });
+            const memoria = { tipo: "linea" };
+            return (c) => dibujarSerie(c, { etiqueta, labels: anios, series, memoria });
         }
 
         case "donut":
@@ -451,11 +504,39 @@ function crearPanel(vista, { ancho = false, alto = false } = {}) {
 }
 
 /**
+ * Entrada de los paneles: fundido + leve subida, escalonada, y el grafico de
+ * cada uno se vuelve a dibujar desde cero (barras que crecen, linea que sube).
+ * Se usa al terminar la carga de la pagina y cada vez que cambian las vistas.
+ */
+function animarPaneles() {
+    if (REDUCIR_MOVIMIENTO) return;
+    $("graficos").querySelectorAll(".grafico").forEach((panel, i) => {
+        panel.style.setProperty("--orden", String(i));
+        panel.classList.remove("entrando");
+        void panel.offsetWidth;  // reinicia la animacion CSS si ya estaba
+        panel.classList.add("entrando");
+        // al terminar se quita: la animacion no debe fijar `transform` y
+        // anular el efecto hover del panel. El temporizador cubre el caso en
+        // que `animationend` no llega (pestana en segundo plano).
+        const quitar = () => panel.classList.remove("entrando");
+        panel.addEventListener("animationend", quitar, { once: true });
+        setTimeout(quitar, 420 + i * 70 + 150);
+        panel.querySelectorAll("canvas").forEach((canvas) => {
+            const chart = Chart.getChart(canvas);
+            if (chart) {
+                chart.reset();
+                chart.update();
+            }
+        });
+    });
+}
+
+/**
  * Reemplaza la columna de graficos con estas vistas y las reparte segun cuantas
  * sean: 1 -> ancho completo y alta; 3 -> la primera a lo ancho y dos debajo;
  * 2 y 4 -> dos columnas; mas -> dos columnas, la primera a lo ancho si es impar.
  */
-function mostrarVistas(vistas) {
+function mostrarVistas(vistas, { animar = true } = {}) {
     for (const limpiar of estado.limpiezas) limpiar();
     estado.limpiezas = [];
 
@@ -473,6 +554,7 @@ function mostrarVistas(vistas) {
         // se dibuja despues de insertar: Chart.js necesita medir el contenedor
         estado.limpiezas.push(vista.dibujar(cuerpo));
     });
+    if (animar) animarPaneles();
 }
 
 // -- vista ampliada ------------------------------------------------------------
@@ -599,7 +681,7 @@ function mostrarRespuesta(datos) {
 }
 
 /** Pinta las vistas que pidio el agente. Si no pidio ninguna, el tablero se mantiene. */
-async function aplicarVistas(specs) {
+async function aplicarVistas(specs, { animar = true } = {}) {
     if (!specs.length) return;
     const turno = ++estado.carga;
     const vistas = await Promise.all(specs.map((s) => vistaDelAgente(s)));
@@ -612,7 +694,7 @@ async function aplicarVistas(specs) {
         if (repetidos.includes(v.titulo)) v.titulo = `${v.titulo} · ${NOMBRE_CHART[specs[i].chart]}`;
     });
     estado.specs = specs;  // para rehacer los graficos si cambia el idioma
-    mostrarVistas(vistas);
+    mostrarVistas(vistas, { animar });
     $("graficos").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -696,20 +778,25 @@ function actualizarEnlaceChat() {
     if (chat) {
         $("enlace-chat").href = conIdioma(chat);
         $("enlace-chat").hidden = false;
+        suavizarEnlace($("enlace-chat"));
     }
 }
 
 // Cambio de idioma: los textos fijos los traduce i18n.js; aqui se rehace lo
 // generado (graficos, estado del servicio, enlace al chat).
-montarSelector($("barra-acciones"), () => {
+montarSelector($("barra-acciones"), () => conTransicion(async () => {
     actualizarEnlaceChat();
     refrescarSalud();
-    if (estado.specs) aplicarVistas(estado.specs);
-    else vistasIniciales().then(mostrarVistas);
-});
+    // bajo el cargador no se anima: se anima al retirarse (abajo)
+    if (estado.specs) await aplicarVistas(estado.specs, { animar: false });
+    else mostrarVistas(await vistasIniciales(), { animar: false });
+}).then(animarPaneles));
 actualizarEnlaceChat();
 
-mostrarVistas(await vistasIniciales());
+// Primera carga: las vistas iniciales (datos reales) se arman bajo la pantalla
+// de carga y se animan cuando esta se retira, para que la animacion se vea.
+mostrarVistas(await vistasIniciales(), { animar: false });
+paginaLista().then(animarPaneles);
 
 // La salud decide si se permiten datos simulados (solo en modo stub).
 await refrescarSalud();

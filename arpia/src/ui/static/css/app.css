@@ -868,3 +868,152 @@ a {
     border-color: var(--arpia-border-active);
     color: var(--arpia-text);
 }
+
+/* =========================
+   PANTALLA DE CARGA (#cargador)
+   =========================
+ * Visible desde el primer pintado; transiciones.js la desvanece cuando la
+ * pagina esta lista y la vuelve a mostrar al navegar entre chat y tablero.
+ * Respaldo: si el JS no corre, `cargador-respaldo` la oculta a los 6 s.
+ */
+
+.cargador {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    background:
+        radial-gradient(circle at 50% 45%,
+            color-mix(in srgb, var(--arpia-surface) 70%, transparent),
+            transparent 60%),
+        var(--arpia-bg);
+    color: var(--arpia-text-secondary);
+    opacity: 1;
+    transition: opacity 350ms ease, visibility 350ms;
+    animation: cargador-respaldo 0s linear 6s forwards;
+}
+
+.cargador[hidden] {
+    display: none;
+}
+
+.cargador--visible {
+    opacity: 1;
+    visibility: visible;
+    animation: none;
+}
+
+.cargador--fuera {
+    opacity: 0;
+    visibility: hidden;
+    animation: none;
+    pointer-events: none;
+}
+
+@keyframes cargador-respaldo {
+    to { opacity: 0; visibility: hidden; pointer-events: none; }
+}
+
+/* -- orbita: nucleo + anillo + satelite -- */
+
+.cargador-orbita {
+    position: relative;
+    width: 72px;
+    height: 72px;
+}
+
+.cargador-orbita::before {
+    /* anillo de la orbita */
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--arpia-border-active);
+    border-radius: 50%;
+}
+
+.cargador-orbita::after {
+    /* nucleo */
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border-radius: 50%;
+    background: var(--arpia-primary);
+    animation: cargador-latido 1.6s ease-in-out infinite;
+}
+
+.cargador-satelite {
+    position: absolute;
+    inset: 0;
+    animation: cargador-giro 1.4s linear infinite;
+}
+
+.cargador-satelite::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: -4px;
+    width: 8px;
+    height: 8px;
+    margin-left: -4px;
+    border-radius: 50%;
+    background: var(--arpia-space);
+}
+
+/* estela del satelite: un arco que se desvanece */
+.cargador-satelite::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 2px solid transparent;
+    border-top-color: color-mix(in srgb, var(--arpia-space) 55%, transparent);
+    border-radius: 50%;
+    transform: rotate(-40deg);
+}
+
+.cargador-texto {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+/* puntos suspensivos animados */
+.cargador-texto::after {
+    content: "";
+    display: inline-block;
+    width: 1.5em;
+    text-align: left;
+    animation: cargador-puntos 1.2s steps(4, end) infinite;
+}
+
+@keyframes cargador-giro {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes cargador-latido {
+    0%, 100% { transform: scale(0.8); opacity: 0.7; }
+    50% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes cargador-puntos {
+    0% { content: ""; }
+    25% { content: "."; }
+    50% { content: ".."; }
+    75% { content: "..."; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cargador-satelite,
+    .cargador-orbita::after,
+    .cargador-texto::after {
+        animation: none;
+    }
+}

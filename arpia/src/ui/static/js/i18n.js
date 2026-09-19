@@ -18,6 +18,7 @@ const DICC = {
         "idioma.es": "Español",
         "idioma.en": "English",
         "idioma.cambiar": "Idioma de la página",
+        "cargador.texto": "Cargando",
 
         "salud.verificando": "Verificando servicio…",
         "salud.ok": "Servicio operativo",
@@ -158,12 +159,17 @@ const DICC = {
         "tablero.total": "Total",
         "tablero.sinDato": "(sin dato)",
         "tablero.hallazgos": "Lo que dicen las cifras",
+        "serie.tipo": "Tipo de gráfico",
+        "serie.linea": "Línea",
+        "serie.columnas": "Columnas",
+        "serie.barras": "Barras",
     },
 
     en: {
         "idioma.es": "Español",
         "idioma.en": "English",
         "idioma.cambiar": "Page language",
+        "cargador.texto": "Loading",
 
         "salud.verificando": "Checking service…",
         "salud.ok": "Service operational",
@@ -304,6 +310,10 @@ const DICC = {
         "tablero.total": "Total",
         "tablero.sinDato": "(no data)",
         "tablero.hallazgos": "What the figures show",
+        "serie.tipo": "Chart type",
+        "serie.linea": "Line",
+        "serie.columnas": "Columns",
+        "serie.barras": "Bars",
     },
 };
 
@@ -367,7 +377,7 @@ export function conIdioma(url) {
 }
 
 /**
- * Monta el selector de banderas en `contenedor`. `alCambiar(idioma)` se llama
+ * Monta el selector de banderas al final de `contenedor`. `alCambiar(idioma)` se llama
  * despues de traducir el documento, para que la pagina rehaga lo dinamico.
  */
 export function montarSelector(contenedor, alCambiar) {
@@ -412,6 +422,7 @@ export function montarSelector(contenedor, alCambiar) {
 
     grupo.append(...botones);
     refrescar();
-    contenedor.prepend(grupo);
+    // al final de la barra (esquina derecha): posicion fija del selector de idioma
+    contenedor.append(grupo);
     traducirDocumento();
 }

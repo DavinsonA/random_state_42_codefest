@@ -5,12 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title data-i18n="chat.titulo">A.R.P.I.A. · Asistente de análisis</title>
     <meta name="description" content="Asistente multiagente de análisis de fuentes abiertas sobre inteligencia aeroespacial, con evidencia citada.">
-    <link rel="stylesheet" href="/static/css/tokens.css">
-    <link rel="stylesheet" href="/static/css/app.css">
-    <link rel="stylesheet" href="/static/css/referencias.css">
-    <script type="module" src="/static/js/chat.js"></script>
+    <link rel="icon" type="image/png" sizes="64x64" href="img/favicon.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png">
+    <!-- rutas relativas: funcionan servidas por el backend (static/ montado en /)
+         y abiertas con Live Server -->
+    <link rel="stylesheet" href="css/tokens.css">
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/referencias.css">
+    <script type="module" src="js/chat.js"></script>
 </head>
 <body class="pagina-chat">
+
+    <!-- pantalla de carga: visible desde el primer pintado (js/transiciones.js) -->
+    <div class="cargador" id="cargador" role="status" aria-live="polite">
+        <div class="cargador-orbita" aria-hidden="true"><span class="cargador-satelite"></span></div>
+        <p class="cargador-texto" data-i18n="cargador.texto">Cargando</p>
+    </div>
 
     <header class="barra">
 <div class="marca">
@@ -20,12 +30,13 @@
 </div>
 
         <div class="barra-acciones" id="barra-acciones">
+            <a class="boton boton-secundario" id="enlace-tablero" href="#" hidden data-i18n="chat.tablero">Tablero</a>
+            <button type="button" class="boton boton-secundario" id="nueva-conversacion" data-i18n="chat.nueva">Nueva conversación</button>
             <span class="salud" id="salud" data-estado="cargando" role="status">
                 <span class="salud-punto" aria-hidden="true"></span>
                 <span class="salud-texto" data-i18n="salud.verificando">Verificando servicio…</span>
             </span>
-            <button type="button" class="boton boton-secundario" id="nueva-conversacion" data-i18n="chat.nueva">Nueva conversación</button>
-            <a class="boton boton-secundario" id="enlace-tablero" href="#" hidden data-i18n="chat.tablero">Tablero</a>
+            <!-- el selector de idioma lo agrega i18n.js aqui, al final -->
         </div>
     </header>
 

@@ -7,6 +7,7 @@
 import { enviarChat, obtenerProgreso, obtenerSalud } from "./api.js";
 import { conIdioma, mensajeError, montarSelector, t } from "./i18n.js";
 import { enlazarReferencias, hacerCitaInteractiva } from "./referencias.js";
+import { conTransicion, paginaLista, suavizarEnlace } from "./transiciones.js";
 
 const INTERVALO_SALUD_MS = 60000;
 
@@ -1246,15 +1247,16 @@ function actualizarEnlaceTablero() {
 
         enlace.href = tablero;
         enlace.hidden = false;
+        suavizarEnlace(enlace);
     }
 }
 
 // Cambio de idioma: i18n.js traduce los textos fijos; aqui se rehace lo
 // generado. Los turnos ya mostrados conservan el idioma en que se pintaron.
-montarSelector($("barra-acciones"), () => {
+montarSelector($("barra-acciones"), () => conTransicion(async () => {
     actualizarEnlaceTablero();
     refrescarSalud();
-});
+}));
 actualizarEnlaceTablero();
 
 sesionId();
@@ -1265,5 +1267,7 @@ setInterval(
     refrescarSalud,
     INTERVALO_SALUD_MS
 );
+
+paginaLista();
 
 entrada.focus();

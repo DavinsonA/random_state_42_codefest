@@ -383,6 +383,8 @@
 .pagina-tablero .lienzo {
     position: relative;
     height: 250px;
+    /* el canvas nunca se sale de su caja ni tapa lo que va debajo (botones) */
+    overflow: hidden;
 }
 
 /* -- mapa -- */
@@ -794,4 +796,78 @@
     color: var(--arpia-text);
     font-size: 13px;
     line-height: 1.5;
+}
+
+/* =========================
+   SELECTOR DE TIPO DE LA SERIE TEMPORAL
+   =========================
+ * Debajo de "Evolucion temporal": Linea / Columnas / Barras. Mismo lenguaje
+ * que el selector de idioma: el activo gana fondo y borde, no solo color.
+ */
+
+.selector-grafico {
+    position: relative;
+    z-index: 2;  /* siempre por encima del grafico, tambien en pantalla completa */
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    margin-top: 10px;
+}
+
+.tipo-grafico {
+    min-height: 26px;
+    padding: 0 12px;
+    background: color-mix(in srgb, var(--arpia-void) 35%, transparent);
+    border: 1px solid var(--t-borde);
+    border-radius: 999px;
+    color: var(--arpia-text-secondary);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.tipo-grafico:hover {
+    border-color: var(--t-borde-hover);
+    color: var(--arpia-text);
+}
+
+.tipo-grafico[aria-pressed="true"] {
+    background: var(--arpia-space);
+    border-color: var(--arpia-space);
+    color: var(--arpia-bg);
+}
+
+/* en la vista ampliada el selector queda al pie, sin encoger el grafico */
+.ampliado-cuerpo .selector-grafico {
+    flex-shrink: 0;
+}
+
+/* =========================
+   ENTRADA DE PANELES
+   =========================
+ * dashboard.js pone `.entrando` al terminar la carga y al cambiar las vistas;
+ * `--orden` escalona los paneles 70 ms entre si. Se quita al acabar para no
+ * pisar el `transform` del hover.
+ */
+
+.pagina-tablero .grafico.entrando {
+    animation: panel-entrada 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    animation-delay: calc(var(--orden, 0) * 70ms);
+}
+
+@keyframes panel-entrada {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.985);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pagina-tablero .grafico.entrando { animation: none; }
 }
