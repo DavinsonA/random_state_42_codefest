@@ -588,6 +588,7 @@ uv run pytest tests -q                                      # 319 casos
 | `test_voz.py` | la voz del sistema vive en un solo módulo; ningún prompt define su propio tono | 15 |
 | `test_trazabilidad_analitico.py` | cada cifra cita sus documentos; `citations` y `retrieval_context` llenos; el verificador no reescribe un conteo trazable; el conteo no se cae si el índice falla | 12 |
 | `test_theme.py` | ningún color hexadecimal fuera de `src/theme/` | 6 |
+| `test_frontend_referencias.py` + `tests/js/` | la lógica pura del tooltip y del visor (partir el texto por `doc_id`, describir una cita, paginar), con `node --test`; se omite si no hay Node | 1 (12 en JS) |
 | `test_referencias.py` | citas con `formato`/`posicion`/`total_fragmentos`; lectura por posición sobre un `VectorIndex` real pequeño; `/api/document` (ventana, bordes, tope, fragmento ajeno, doc desconocido, recorte); ids hostiles o truncados no abren otro fragmento | 28 |
 
 > Las pruebas de `test_graph.py` cuentan llamadas con **contadores del LLM falso**; no leen
@@ -646,7 +647,7 @@ orquestador, el caché y la memoria con su evidencia, su propuesta de arreglo y 
 | 17 | ✅ **HECHO en `adea37f`.** La tabla del corpus no se cachea vacía | Antes, si el volumen del índice no estaba al llegar la primera petición, el tablero quedaba en blanco hasta reiniciar | Los endpoints responden `disponible: false` |
 | 18 | **`FRONTEND.md` contradice al backend en 7 puntos** (§14): `fenomeno=` vs `fenomenos=`, citas con `quote`/`score`, `chart: "map"`, `lugar`, `group_by: "mes"`, fechas completas, `/api/graph` | Quien construya el tablero con esa guía escribirá código que el backend rechaza o ignora | Corregir `FRONTEND.md` con la tabla de §14 |
 | 19 | ✅ `/api/trace` **cerrado en `86e8244`** (solo con `ARPIA_DEBUG_TRACE`). El resto de `/api/*` sigue siendo público y de solo lectura, en los tres dominios | Lo público ya no expone preguntas ni salidas del modelo | Confirmar que `ARPIA_DEBUG_TRACE` queda vacío en Coolify |
-| 20 | **El chat no usa `/api/evidence`**: `api.js` no tiene esa función, así que hacer clic en una cita no abre el fragmento. Ahora también falta el tooltip y el visor que sugirió ADL | `FRONTEND.md` lo llama "requisito obligatorio de la especificación" | El backend ya está (`/api/evidence`, `/api/document`, citas enriquecidas): contrato en §14, "Referencias". Falta `obtenerEvidencia` y `obtenerDocumento` en `api.js` y el tooltip y panel en `chat.js` |
+| 20 | ✅ **Resuelto en el chat.** Antes el chat no usaba `/api/evidence`: hacer clic en una cita no abría el fragmento, y faltaban el tooltip y el visor que sugirió ADL | `FRONTEND.md` lo llama "requisito obligatorio de la especificación" | `js/referencias.js` (tooltip y visor), `obtenerEvidencia` y `obtenerDocumento` en `api.js`, enganche en `chat.js`. Detalle en §14, "Referencias". Pendiente: el tablero no usa las referencias todavía |
 | 21 | ✅ **Resuelto con el presupuesto de tiempo (#6).** Timeout del front (90 s) vs peor caso del backend | — | — |
 | 22 | ✅ **Resuelto.** El orquestador fallaba con el modelo real: `gpt-oss-120b` devolvía la clave `Pasos` (el `title` del esquema) y `Plan` (`extra="forbid"`) la rechazaba, con lo que el respaldo mandaba todo al documental. Medido antes: 1 de 6 llamadas válidas; después: 6 de 6, y las tres preguntas típicas responden por `/chat` con el agente correcto | — | `plan.py`: `Plan` y `Paso` normalizan las claves (`Pasos` → `pasos`, `Group By` → `group_by`) y siguen rechazando campos inexistentes. `plan_de_respaldo` manda el conteo inequívoco al analítico (y suma el visualizador si piden una gráfica). `executors._dimension` ya no depende de las tildes. No se añadió reintento: la causa raíz está cerrada y cada reintento costaría tokens |
 | 23 | ✅ **Resuelto.** El caché guardaba como buena la respuesta del plan de respaldo (`estado: ok`) y repetir la pregunta la devolvía con `cache:1.00` hasta reiniciar | — | `planificar` anota `turnlog.marcar_no_cacheable("plan_de_respaldo")` en sus dos salidas al respaldo y `run_chat` no guarda en el caché un turno marcado (queda en el log). El `estado` sigue siendo `ok`. Cualquier agente puede usar la misma marca para otros degradados |
@@ -762,11 +763,26 @@ Todos devuelven **HTTP 200**. Un fallo o un dato inexistente llega como
 Cada cifra viene con los `doc_id` que la sustentan, y `/api/evidence` abre el fragmento
 exacto: es la trazabilidad que exige `RETO.md`.
 
-### Referencias: ver de dónde sale cada afirmación (backend hecho, frontend pendiente)
+### Referencias: ver de dónde sale cada afirmación (hecho en backend y en el chat)
 
 ADL sugirió que, al pasar el ratón por una referencia, se vea de dónde sale, y que con un clic se
-abra el documento o el fragmento. **El backend está listo; falta el frontend** (`src/ui/static/`, de
-quien lo mantiene). Tres niveles, de menor a mayor costo:
+abra el documento o el fragmento. **Está implementado en el chat** (el tablero no lo usa todavía). Tres
+niveles, de menor a mayor costo:
+
+| Pieza | Dónde |
+|---|---|
+| Módulo nuevo: tooltip, visor, paginación | `src/ui/static/js/referencias.js` y `css/referencias.css` |
+| Llamadas de red | `obtenerEvidencia` y `obtenerDocumento` en `js/api.js` |
+| Enganche en el chat | `chat.js`: `enlazarReferencias(cuerpo, citations)` sobre el texto de la respuesta y `hacerCitaInteractiva(item, cita)` en cada tarjeta de "Evidencia"; `chat.html` carga el CSS |
+| Pruebas | `tests/js/referencias.test.mjs` (`node --test`, corre dentro de pytest) |
+
+**Cómo se ve.** Los `doc_id` del texto de la respuesta que tienen cita se vuelven **botones ámbar**
+(`--arpia-evidence`, el color reservado a trazabilidad). Pasar el ratón o enfocarlos con el teclado abre el
+tooltip; clic o Enter abre el visor (panel lateral con el fragmento citado resaltado, sus vecinos y
+"Anteriores" / "Siguientes"). Escape cierra y el foco vuelve a la referencia. Cada tarjeta de evidencia
+trae además su línea de procedencia y un botón "Abrir documento".
+
+Los tres gestos:
 
 | Gesto | Qué mostrar | Fuente de datos | Peticiones |
 |---|---|---|---|
@@ -790,7 +806,7 @@ tokens y no exige subir los originales al servidor. Abrir el archivo original (s
 quedó **fuera a propósito**: pediría un endpoint que sirva archivos, que debería resolver por `doc_id` y
 nunca aceptar una ruta.
 
-**Lo que el frontend debe cuidar**
+**Lo que el frontend debe cuidar** (el chat ya lo cumple; el tablero, si reutiliza `referencias.js`, hereda esto)
 - **Pintar el texto como texto, nunca como HTML** (`textContent`, no `innerHTML`). El corpus viene de
   fuentes externas y puede traer texto malicioso; es parte del puntaje de seguridad.
 - Un fragmento llega a 18.000 tokens: `/api/document` recorta cada uno a 4.000 caracteres y marca

@@ -68,6 +68,32 @@ export function obtenerSalud() {
     return pedir("/health");
 }
 
+/** GET /api/evidence/{chunk_id} — el fragmento exacto detras de una cita.
+ *
+ * Responde 200 siempre: `{ disponible: false, motivo }` si no existe.
+ */
+export function obtenerEvidencia(chunkId) {
+    return pedir(`/api/evidence/${encodeURIComponent(chunkId)}`);
+}
+
+/** GET /api/document/{doc_id} — el documento reconstruido con fragmentos vecinos.
+ *
+ * `chunkId` centra la ventana en el fragmento citado y lo marca `citado`;
+ * `posicion` es un centro alternativo (para paginar); `ventana` son los
+ * fragmentos a cada lado (el backend la limita a 0..10).
+ * Devuelve `{ disponible, doc_id, formato, fuente, total_fragmentos, desde, hasta,
+ * hay_anterior, hay_siguiente, fragmentos: [{ chunk_id, posicion, texto, truncado,
+ * citado }] }`, o `{ disponible: false, motivo }`.
+ */
+export function obtenerDocumento(docId, { chunkId, posicion, ventana } = {}) {
+    const q = new URLSearchParams();
+    if (chunkId) q.set("chunk_id", chunkId);
+    if (posicion !== undefined && posicion !== null) q.set("posicion", String(posicion));
+    if (ventana !== undefined && ventana !== null) q.set("ventana", String(ventana));
+    const consulta = q.toString();
+    return pedir(`/api/document/${encodeURIComponent(docId)}${consulta ? `?${consulta}` : ""}`);
+}
+
 /** GET /api/aggregate — datos de una vista del tablero.
  *
  * PROPUESTO, aun no existe en el backend (pedido al arquitecto). Forma esperada:

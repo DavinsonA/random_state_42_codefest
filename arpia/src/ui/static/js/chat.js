@@ -5,6 +5,7 @@
 // (vector de inyeccion, RETO.md §Defensa) y no debe convertirse en marcado.
 
 import { enviarChat, obtenerSalud } from "./api.js";
+import { enlazarReferencias, hacerCitaInteractiva } from "./referencias.js";
 
 const INTERVALO_SALUD_MS = 60000;
 
@@ -460,6 +461,8 @@ function renderCitas(citas) {
             );
         }
 
+        hacerCitaInteractiva(item, c);
+
         lista.append(item);
     }
 
@@ -784,6 +787,8 @@ function renderRespuesta(
         datos.respuesta ||
             "(respuesta vacía)"
     );
+
+    enlazarReferencias(cuerpo, datos.citations);
 
     turno.append(cuerpo);
 
