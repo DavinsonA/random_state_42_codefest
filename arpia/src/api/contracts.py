@@ -194,6 +194,35 @@ class ViewSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalizar_claves(cls, datos: Any) -> Any:
+        """Tolera la capitalizacion del esquema en la salida del modelo.
+
+        Medido contra el gateway real: `gpt-oss-20b` devuelve `{"Chart": ...,
+        "Group By": ...}` —los `title` que pydantic pone en el JSON Schema que
+        se le envia— en parte de las respuestas. Con `extra="forbid"` eso no es
+        un campo mal escrito sino uno DESCONOCIDO, y tumbaba la vista entera:
+        cinco errores de validacion, `view_spec: null`, y una pregunta que pedia
+        una grafica respondida sin grafica.
+
+        El esquema sigue cerrado: una clave que no exista sigue siendo un error.
+        Solo se absorbe una variacion de formato, que es lo que era.
+
+        `src/agents/plan.py` lleva el gemelo de esto para `Plan`. Estan
+        separados a proposito por ahora: `plan.py` importa de este modulo, asi
+        que compartir el helper exigiria moverlo aqui y tocar un archivo que
+        otra sesion esta editando.
+        """
+        if not isinstance(datos, dict):
+            return datos
+        normalizado: dict[str, Any] = {}
+        for clave, valor in datos.items():
+            limpia = str(clave).strip().lower().replace(" ", "_")
+            if limpia not in normalizado or clave == limpia:
+                normalizado[limpia] = valor
+        return normalizado
+
     chart: ChartType
     metrica: Metrica = "conteo_documentos"
     fenomenos: list[Fenomeno] = Field(default_factory=list, description="Vacio = los tres.")

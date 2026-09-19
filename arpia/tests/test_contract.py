@@ -380,3 +380,42 @@ def test_el_cache_no_carga_el_encoder_dentro_de_una_peticion():
     assert not encoder.loaded()
     client.post("/chat", json={"texto": "una consulta cualquiera del corpus"})
     assert not encoder.loaded()
+
+
+# -- capitalizacion del modelo ----------------------------------------------
+
+
+def test_el_viewspec_tolera_las_claves_capitalizadas_del_esquema():
+    """Medido contra el gateway real en produccion: `gpt-oss-20b` devolvio
+    `{"Chart": ..., "Group By": ...}` y la vista se perdio entera —cinco errores
+    de validacion y `view_spec: null` ante una pregunta que pedia una grafica—.
+
+    Es el mismo fallo que ya se corrigio en `Plan`: pydantic manda los `title`
+    del JSON Schema y el modelo los devuelve como claves."""
+    from src.api.contracts import ViewSpec
+
+    v = ViewSpec.model_validate(
+        {
+            "Chart": "bar",
+            "Metrica": "conteo_documentos",
+            "Group By": "fenomeno",
+            "Titulo": "Volumen documental por fenomeno",
+        }
+    )
+    assert v.chart == "bar"
+    assert v.group_by == "fenomeno"
+    assert v.titulo == "Volumen documental por fenomeno"
+
+
+def test_el_viewspec_sigue_siendo_un_esquema_cerrado():
+    """La tolerancia es de formato, no de contenido: el vocabulario cerrado es
+    una frontera de seguridad, no una formalidad."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from src.api.contracts import ViewSpec
+
+    with _pytest.raises(ValidationError):
+        ViewSpec.model_validate({"chart": "bar", "Inventado": 1})
+    with _pytest.raises(ValidationError):
+        ViewSpec.model_validate({"Chart": "mapa_de_calor"})
