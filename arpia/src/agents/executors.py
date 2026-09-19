@@ -17,6 +17,7 @@ para que declarar uno y usar otro sea imposible.
 from __future__ import annotations
 
 import json
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -309,7 +310,9 @@ _DIMENSIONES = (
 def _dimension(consulta: str) -> str:
     from src.retrieval.enrich import _ANIO  # noqa: PLC0415
 
-    bajo = consulta.lower()
+    bajo = "".join(
+        c for c in unicodedata.normalize("NFD", consulta.lower()) if unicodedata.category(c) != "Mn"
+    )
     for dimension, claves in _DIMENSIONES:
         if any(c in bajo for c in claves):
             return dimension

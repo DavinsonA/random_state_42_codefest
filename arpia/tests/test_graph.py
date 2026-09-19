@@ -400,6 +400,54 @@ def test_el_plan_de_respaldo_es_determinista_y_gratis():
     assert p.pasos[0].consulta == "una pregunta"
 
 
+def test_el_plan_acepta_las_claves_con_la_capitalizacion_del_esquema():
+    """gpt-oss-120b devuelve a veces el `title` del esquema ("Pasos") como clave."""
+    p = Plan.model_validate(
+        {
+            "Razonamiento": "conteo",
+            "Pasos": [{"Agente": "agente_analitico", "Consulta": "x", "Group By": "organizacion"}],
+            "Paralelo": False,
+        }
+    )
+    assert p.pasos[0].agente == "agente_analitico"
+    assert p.pasos[0].group_by == "organizacion"
+    assert p.paralelo is False
+
+
+def test_el_plan_sigue_rechazando_campos_que_no_existen():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Plan.model_validate({"Pasos": [], "inventado": 1})
+
+
+@pytest.mark.parametrize(
+    "pregunta, agentes",
+    [
+        ("¿Cuántos documentos hay por fenómeno?", ["agente_analitico"]),
+        ("¿Cuántas publicaciones tiene cada organización?", ["agente_analitico"]),
+        ("Muéstrame la distribución por año", ["agente_analitico"]),
+        (
+            "Grafica la cantidad de documentos por organizacion",
+            ["agente_analitico", "agente_visualizador"],
+        ),
+        ("¿Qué reporta el corpus sobre capacidades antisatélite?", ["agente_documental"]),
+        ("¿Cuántos satélites lanzó China en 2023?", ["agente_documental"]),
+    ],
+)
+def test_el_plan_de_respaldo_manda_el_conteo_al_analitico(pregunta, agentes):
+    from src.agents.plan import plan_de_respaldo
+
+    assert plan_de_respaldo(pregunta).agentes == agentes
+
+
+def test_la_dimension_del_analitico_no_depende_de_las_tildes():
+    from src.agents.executors import _dimension
+
+    assert _dimension("¿Cuántos documentos por organización?") == "organizacion"
+    assert _dimension("evolución por año") == "anio"
+
+
 def test_el_plan_rechaza_agentes_que_no_estan_en_la_agent_card():
     from pydantic import ValidationError
 

@@ -76,11 +76,14 @@ fallan si se reinstala tu verificador anterior o si se quitan las citas.
 
 | # | Prioridad | Hallazgo | Archivos probables |
 |---|---|---|---|
-| 1 | **P0 crítico** | El orquestador falla de forma **intermitente**: el modelo devuelve la clave `Pasos` y `Plan` la rechaza; hoy en 2 de 3 preguntas | `plan.py`, `orchestrator.py` |
+| 1 | ✅ **Resuelto** (ver 2.1) | El orquestador fallaba con la clave `Pasos`; ahora 6 de 6 llamadas válidas con el modelo real | `plan.py`, `executors.py` |
 | 2 | **P0** | El caché semántico guarda como buena la respuesta del plan de respaldo | `chat.py`, `memory.py`, `orchestrator.py` |
 | 3 | P1 | Ningún agente lee la conversación | `graph.py`, `orchestrator.py`, `executors.py` |
 
-### 1. El orquestador falla de forma intermitente: el modelo devuelve la clave `Pasos` (P0, crítico)
+### 1. ✅ RESUELTO: el orquestador fallaba porque el modelo devolvía la clave `Pasos`
+
+> **Estado:** corregido en `plan.py` y `executors.py` (ver 2.1). Lo de abajo queda como registro
+> del diagnóstico original.
 
 **Qué pasa.** Con `gpt-oss-120b`, el plan a veces llega como `{"Pasos": [...]}` (con mayúscula).
 `Plan` tiene `extra="forbid"`, así que la validación falla, `planificar` cae al plan de respaldo y
@@ -187,6 +190,23 @@ anotados para que quede constancia de que se comprobaron contra el código:
 
 También cerraste que el caché distinga conversaciones (`adea37f`).
 
+### Hallazgo 1 (orquestador y clave `Pasos`), cerrado en esta sesión
+
+Validado con el modelo real: **1 de 6** llamadas al orquestador producían un plan válido (las otras
+fallaban con `Extra inputs are not permitted` sobre `Pasos`). Tras el arreglo: **6 de 6**.
+
+- `plan.py`: `Plan` y `Paso` normalizan las claves del JSON (`Pasos` → `pasos`, `Group By` →
+  `group_by`) con un validador `mode="before"`. El esquema sigue cerrado: un campo inexistente se rechaza.
+- `plan.py`: `plan_de_respaldo` manda al analítico la pregunta de conteo inequívoca (palabra de cantidad
+  + unidad del corpus, sin tildes) y suma el visualizador si piden una gráfica. "¿Cuántos satélites
+  lanzó China?" sigue yendo al documental. Cuesta 0 tokens.
+- `executors.py`: `_dimension` quita las tildes; antes "por organización" contestaba por `fenomeno`.
+- No se añadió reintento antes del respaldo: cada uno cuesta tokens y la causa raíz ya está cerrada.
+- Comprobado por `/chat` con el modelo real: conteo por fenómeno → analítico con `doc_id`; pregunta de
+  contenido → documental con citas; "Grafica…" → analítico + `view_spec` de barras.
+- 9 pruebas nuevas en `tests/test_graph.py` (328 en total).
+- **Sigue abierto el hallazgo 2:** el caché aún guarda como buena una respuesta de respaldo.
+
 ---
 
 ## 3. Otros datos útiles medidos
@@ -202,8 +222,8 @@ También cerraste que el caché distinga conversaciones (`adea37f`).
 ## 4. Mensaje sugerido para Davinson
 
 > Davinson: gracias por cerrar los pendientes de `API.md`. Hice pruebas con el modelo real (índice de la Etapa 1, `bge-m3` y LiteLLM) y dejé
-> todo en `arpia/PENDIENTES_AGENTES.md`. Lo urgente son dos cosas: (1) el orquestador falla en
-> preguntas de forma intermitente (hoy 2 de 3) porque `gpt-oss-120b` devuelve `Pasos` y `Plan` la rechaza,
-> así que el sistema multiagente no corre; (2) el caché guarda como buena esa respuesta de respaldo. También
+> todo en `arpia/PENDIENTES_AGENTES.md`. (1) El orquestador fallaba porque `gpt-oss-120b` devolvía `Pasos`
+> y `Plan` la rechazaba; ya lo corregí en `plan.py` y `executors.py` (sección 2.1) y lo puedes revisar.
+> Lo urgente que queda: (2) el caché guarda como buena una respuesta de respaldo. También
 > toqué `analitico` y `verifier.py` para que las cifras citen documentos reales; la sección 1
 > explica por qué y qué necesito que valides.
