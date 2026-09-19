@@ -10,8 +10,9 @@ skills, scripts de iteración) vive en el repo hermano [`../arpia-bundle`](../ar
 
 ## Estado
 
-Reto: **no definido** (se publica el 18 de septiembre). Línea de trabajo
-activa: ver [`docs/architecture.md`](docs/architecture.md).
+Reto publicado (CODEFEST Ad Astra 2026, Etapa 2). Qué exige ADL y cómo se califica:
+[`../RETO.md`](../RETO.md). **Qué está construido, cómo funciona el API y qué falta:
+[`API.md`](API.md)** — empieza por ahí.
 
 ## Cómo se corre
 
@@ -44,7 +45,7 @@ src/
 ├── agents/               estado + grafo LangGraph
 ├── api/
 │   ├── contracts.py       ÚNICO lugar con los esquemas Pydantic (formato ADL de /chat)
-│   └── main.py             endpoints: /chat /topics /health /usage
+│   └── main.py             endpoints: /chat /agent-card /health /usage
 └── ui/                   Streamlit
 
 docs/

@@ -12,7 +12,7 @@ que HTML sirve en `/`: `dashboard.*` recibe el tablero y cualquier otro host
 recibe el chat. Asi un solo despliegue cubre los tres entregables y no hay un
 segundo contenedor que pueda caerse durante la ventana de evaluacion.
 
-Los archivos viven en `static/`, que mantiene OTRA sesion. Este modulo nunca
+Los archivos viven en `src/ui/static/`, que mantiene OTRA sesion. Este modulo nunca
 los escribe; si no existen, degrada a un aviso legible en vez de un 500.
 """
 
@@ -28,7 +28,7 @@ from src.config import get_logger
 
 log = get_logger(__name__)
 
-STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
+STATIC_DIR = Path(__file__).resolve().parents[1] / "ui" / "static"
 DASHBOARD_HOST_PREFIX = "dashboard."
 
 _RAIZ = ("/", "/index.html")

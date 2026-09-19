@@ -214,6 +214,14 @@ class AgentResponse(BaseModel):
     mode: Mode = Field("stub", description='"live" en despliegue real; "stub" son datos simulados.')
     citations: list[Citation] = Field(default_factory=list)
     view_spec: ViewSpec | None = Field(None, description="Presente solo si el turno pide vista.")
+    trace_id: str = Field(
+        "",
+        description=(
+            "Correlaciona esta respuesta con su arbol de ejecucion en "
+            "GET /api/trace/{trace_id}. Es lo que permite explicar una respuesta "
+            "rara despues de que ocurrio."
+        ),
+    )
 
 
 #: Alias historicos. El nombre de la clase no viaja en el JSON, pero hay codigo
@@ -282,4 +290,11 @@ class UsageResponse(BaseModel):
     cache: dict[str, Any] = Field(
         default_factory=dict,
         description="Eficacia del cache semantico: entradas y tasa de acierto.",
+    )
+    verificador: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Cuantas veces se activo el verificador. Si la tasa se acerca a 1, el "
+            "disparador esta mal puesto y se paga una llamada extra por turno."
+        ),
     )

@@ -71,6 +71,7 @@ class VectorIndex:
         self._fh = None
         self._offsets: array[int] = array("q")
         self._doc_offsets: dict[str, int] = {}
+        self._doc_chunks: dict[str, int] = {}
         self._manifest: dict[str, Any] = {}
         self._lock = threading.Lock()
 
@@ -85,9 +86,15 @@ class VectorIndex:
         return self.base_path / "index.faiss"
 
     def _scan_offsets(self) -> None:
-        """Recorre el JSONL una vez y anota donde empieza cada fila."""
+        """Recorre el JSONL una vez y anota donde empieza cada fila.
+
+        En la misma pasada cuenta fragmentos por documento: es gratis aqui y
+        evita un segundo recorrido de 344 MB cuando el agente analitico pide
+        `conteo_fragmentos`.
+        """
         offsets = array("q")
         docs: dict[str, int] = {}
+        chunks: dict[str, int] = {}
         with self.meta_path.open("rb") as fh:
             pos = 0
             for linea in fh:
@@ -95,10 +102,13 @@ class VectorIndex:
                     offsets.append(pos)
                     m = _DOC_ID.search(linea, 0, 200)
                     if m:
-                        docs.setdefault(m.group(1).decode("utf-8"), pos)
+                        doc_id = m.group(1).decode("utf-8")
+                        docs.setdefault(doc_id, pos)
+                        chunks[doc_id] = chunks.get(doc_id, 0) + 1
                 pos += len(linea)
         self._offsets = offsets
         self._doc_offsets = docs
+        self._doc_chunks = chunks
 
     def _load(self) -> None:
         if self._index is not None:
@@ -197,6 +207,60 @@ class VectorIndex:
             if offset is not None:
                 encontrados[doc_id] = enrich(self._row_at(offset))
         return encontrados
+
+    def chunk(self, chunk_id: str) -> dict[str, Any] | None:
+        """Un fragmento concreto por su `chunk_id`. None si no existe.
+
+        Sin mapa en memoria: los `chunk_id` tienen la forma
+        `{doc_id}__chunk_{n}` y el JSONL esta agrupado por documento, asi que se
+        salta al primer fragmento del documento y se avanza hasta encontrarlo.
+        Un diccionario de 326.866 claves costaria ~40 MB para responder a un
+        endpoint que el tablero usa al hacer clic en una cita.
+        """
+        self._load()
+        doc_id = chunk_id.split("__chunk_")[0]
+        offset = self._doc_offsets.get(doc_id)
+        if offset is None:
+            return None
+
+        total = self._doc_chunks.get(doc_id, 0)
+        with self._lock:
+            assert self._fh is not None
+            self._fh.seek(offset)
+            for _ in range(total):
+                linea = self._fh.readline()
+                if not linea:
+                    break
+                if chunk_id.encode("utf-8") in linea:
+                    return enrich(json.loads(linea))
+        return None
+
+    def document_table(self) -> list[dict[str, Any]]:
+        """Una fila por documento, con sus dimensiones agregables.
+
+        1.826 filas leidas por `seek` desde el primer fragmento de cada
+        documento: no recorre el corpus. Es la "tabla estructurada" sobre la que
+        opera el agente analitico, y la unica fuente de los conteos del tablero.
+        Contar por busqueda semantica daria cifras que parecen correctas y no lo
+        son; esto son conteos exactos.
+        """
+        self._load()
+        filas: list[dict[str, Any]] = []
+        for doc_id, offset in self._doc_offsets.items():
+            row = enrich(self._row_at(offset))
+            filas.append(
+                {
+                    "doc_id": doc_id,
+                    "fenomeno": row.get("fenomeno_id", ""),
+                    "fenomeno_nombre": row.get("fenomeno_nombre", ""),
+                    "organizacion": row.get("organizacion", ""),
+                    "formato": row.get("formato", ""),
+                    "anio": row.get("anio"),
+                    "fuente": row.get("fuente", ""),
+                    "n_fragmentos": self._doc_chunks.get(doc_id, 0),
+                }
+            )
+        return filas
 
     def top_documents(self, hits: list[Hit], n: int = 3) -> list[str]:
         """Agrega fragmentos a documentos por max-pooling de puntaje."""

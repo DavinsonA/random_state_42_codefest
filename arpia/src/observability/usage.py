@@ -9,8 +9,11 @@ el consumo propio y para llenar `metadata.tokens_por_agente` del formato ADL.
 from __future__ import annotations
 
 import contextvars
+import threading
 from dataclasses import dataclass, field
 from typing import Any
+
+_lock = threading.Lock()
 
 
 @dataclass
@@ -76,10 +79,13 @@ def record_usage(usage: dict[str, Any] | None, agent: str = "", model: str = "")
     usage = usage or {}
     input_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
     output_tokens = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
-    _session.add(input_tokens, output_tokens)
     record = _current_request.get()
-    if record is not None:
-        record.add(input_tokens, output_tokens, agent, model)
+    # Candado: los pasos de un plan paralelo suman desde hilos distintos sobre el
+    # MISMO acumulador del turno, y `+=` sobre un entero no es atomico.
+    with _lock:
+        _session.add(input_tokens, output_tokens)
+        if record is not None:
+            record.add(input_tokens, output_tokens, agent, model)
 
 
 def request_usage() -> dict[str, int]:

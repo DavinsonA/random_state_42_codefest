@@ -148,6 +148,7 @@ def _build(
         mode=get_settings().arpia_mode,  # type: ignore[arg-type]
         citations=[Citation(**c) for c in turnlog.citations()],
         view_spec=view_spec,
+        trace_id=tracing.current_trace_id() or "",
     )
 
 

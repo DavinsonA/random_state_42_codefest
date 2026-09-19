@@ -10,10 +10,13 @@ comparten el objeto aunque copien el contexto).
 from __future__ import annotations
 
 import contextvars
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
 MAX_OUTPUT_CHARS = 1500
+
+_lock = threading.Lock()
 
 
 @dataclass
@@ -66,11 +69,14 @@ def add_citations(rows: list[dict[str, Any]]) -> None:
     log = _current.get()
     if log is None:
         return
-    vistos = {c.get("chunk_id") for c in log.citations}
-    for row in rows:
-        if row.get("chunk_id") not in vistos:
-            log.citations.append(row)
-            vistos.add(row.get("chunk_id"))
+    # Candado: los pasos de un plan paralelo llaman aqui desde hilos distintos y
+    # la deduplicacion es "mirar y luego agregar", que no es atomico.
+    with _lock:
+        vistos = {c.get("chunk_id") for c in log.citations}
+        for row in rows:
+            if row.get("chunk_id") not in vistos:
+                log.citations.append(row)
+                vistos.add(row.get("chunk_id"))
 
 
 def citations() -> list[dict[str, Any]]:
