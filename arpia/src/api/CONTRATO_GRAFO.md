@@ -78,23 +78,28 @@ respuesta = result["answer"]  # obligatorio, texto
 El API pasa `sesion_id` como `thread_id`. Si el grafo compila con un checkpointer,
 recuerda la conversación; si no, cada pregunta es independiente y no pasa nada.
 
-Si se activa la memoria, el grafo actual tiene tres problemas (verificados con un
-LLM falso; no están corregidos aquí porque el grafo no es del API):
+**Ya está activada y resuelta** (Fase 3). El nodo `begin` de `src/agents/graph.py`
+abre cada turno haciendo tres cosas, y cada una cierra un fallo que sí se midió
+con memoria encendida:
 
-1. `reason` solo agrega la pregunta cuando `messages` está vacío: con memoria, el
-   turno 2 nunca vería la pregunta nueva.
-2. `turns` (y `queries`/`evidence`) usan `operator.add` y acumulan entre turnos: el
-   tope de iteraciones se agotaría a los pocos mensajes.
-3. El historial conserva los mensajes de herramientas de turnos anteriores: cada
-   turno arrastra evidencia vieja, sube los tokens (Bloque B) y contamina el
-   contexto que ADL mide en Faithfulness.
+1. Agrega la pregunta **siempre**, no solo cuando el historial está vacío: si no,
+   el turno 2 nunca vería la pregunta nueva.
+2. Reinicia los campos del turno (`TURNO_LIMPIO` en `state.py`): si no, la
+   evidencia del turno 1 se cita en el turno 5 como si fuera de esta pregunta.
+3. Borra del historial los mensajes de herramientas de turnos anteriores
+   (`RemoveMessage`) y recorta la ventana a `VENTANA_TURNOS`: arrastrarlos sube
+   los tokens de cada turno (Bloque B) y contamina el `retrieval_context` que ADL
+   mide en Faithfulness.
 
-Solución probada: un nodo `begin` que agrega la pregunta y reinicia `turns`, y un
-`compose` que al cerrar borra los mensajes de herramientas del turno
-(`RemoveMessage`), dejando en el historial solo pregunta/respuesta. Además, recortar
-el historial a las últimas N vueltas y limpiar mensajes huérfanos de un turno que
-falló a medias. Un checkpointer `InMemorySaver` crece sin límite: necesita expiración
-y tope de sesiones.
+La persistencia vive en `src/agents/checkpoint.py`: SQLite en `state/`, no
+`InMemorySaver`, precisamente porque el de memoria crece sin límite durante las
+24 horas del evento y se pierde en cada redespliegue. Si la ruta no es escribible
+se cae a memoria y lo avisa; `/health` lo reporta en `memoria_persistente`.
+
+Lo que un agente recibe de la conversación previa no es el historial crudo:
+`memory.conversacion_previa` arma las últimas vueltas, recortadas, sin mensajes
+de herramientas y sin la pregunta actual. En el primer turno de una sesión eso
+cuesta **cero tokens extra**.
 
 ## Estados de `metadata.estado`
 

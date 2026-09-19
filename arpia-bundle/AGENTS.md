@@ -46,14 +46,14 @@ existe en el JSON, no existe en la aplicación.
 El fundamento visual es deliberadamente agnóstico al framework.
 
 No asumas ni introduzcas un framework de frontend basándote en estos
-documentos. El frontend eventual puede ser Python o un framework
-compatible con Python.
+documentos.
 
-**Estado en este repo:** el equipo seleccionó **Streamlit** como frontend
-primario (ver `docs/architecture.md` §4). Esa selección es una decisión de
-proyecto, no una propiedad del fundamento visual. La capa de adaptación
-vive aislada en `src/theme/` para que cambiar de framework no obligue a
-tocar los tokens.
+**Estado en este repo:** el frontend es **HTML, CSS y JavaScript plano**
+(`../arpia/src/ui/static/`), servido por el mismo contenedor de la API. Sin
+framework, sin build y sin ninguna referencia externa: si la red del venue
+falla durante la evaluación, la interfaz sigue en pie. Los tokens tienen dos
+espejos —`src/theme/tokens.py` para el Python y `css/tokens.css` para el
+navegador— y ambos derivan del mismo `design-tokens.json`.
 
 ## 4. Semantic color rules
 

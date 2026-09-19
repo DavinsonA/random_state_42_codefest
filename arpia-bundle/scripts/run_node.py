@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-"""Ejecuta nodos o el grafo completo desde terminal, sin levantar la UI.
+"""Ejecuta nodos o el grafo completo desde terminal, sin levantar el servidor.
 
 Es la herramienta principal de iteracion durante el evento: permite probar la
-logica de un agente y leer su traza en segundos, en vez de esperar un reload
-de Streamlit.
+logica de un agente y leer su traza en segundos, sin arrancar `uvicorn` ni
+abrir el navegador.
 
 Importa `src` desde ../arpia (ARPIA_ROOT). Requiere las dependencias de
 `arpia/pyproject.toml` instaladas: correr con `uv run --project ../arpia`

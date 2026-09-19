@@ -27,7 +27,7 @@
 | Índice vectorial, encoder local, agregaciones | ✅ hecho | `src/retrieval/` |
 | Enrutamiento por `Host` (un contenedor, 3 dominios) | ✅ hecho | `src/api/routing.py` |
 | Traducción del modelo de la card al id de LiteLLM (`gateway_model_for`) | ✅ hecho (§6) | `src/agents/card.py` |
-| **Nada se ha probado aún con el modelo real** | ❌ | — |
+| Pruebas con el modelo real | ⚠️ solo manuales (19-sep): las 423 automáticas usan modelos falsos | §11 |
 | Endpoints del tablero: `/api/components`, `/api/aggregate`, `/api/timeline`, `/api/evidence/{chunk_id}`, `/api/document/{doc_id}`, `/api/trace/{trace_id}` | ✅ hechos | `src/api/dashboard.py` |
 | `GET /api/geo` | ⚠️ existe pero responde siempre "no disponible": el corpus no tiene lugar (§14) | `dashboard.py` |
 | `GET /api/graph` (lo cita `FRONTEND.md`) | ❌ no existe | — |
@@ -35,7 +35,7 @@
 | Chat web (`chat.html`), sin CDN | ✅ hecho | `src/ui/static/` |
 | Tablero web (`dashboard.html`, Chart.js vendorizado) | ✅ hecho: abre con datos reales del corpus y sin datos de ejemplo (§14) | `src/ui/static/` |
 
-**Lo más importante que hay que saber:** el backend está construido y sus 390 pruebas
+**Lo más importante que hay que saber:** el backend está construido y sus 423 pruebas
 pasan; **casi todas usan modelos falsos**, y con el modelo real solo hay pruebas manuales
 (§11). Esas pruebas manuales, hechas el 19 de septiembre con el índice de la Etapa 1, el
 encoder `bge-m3` y LiteLLM, **funcionan de punta a punta** (pregunta documental, cuantitativa
@@ -621,8 +621,11 @@ siguen abiertos. Del #9 al #13 se atendieron con la Fase 5, y Davinson cerró en
 pendientes #6, #7, #8, #9, #16, #17, #21 y la delegación de #4 (ver cada fila); del #16 al #24
 son nuevos (el #22, #23 y #24 salieron de las pruebas con el modelo real).
 
-Para quien lleva los agentes: [`PENDIENTES_AGENTES.md`](PENDIENTES_AGENTES.md) resume los hallazgos abiertos del
-orquestador, el caché y la memoria con su evidencia, su propuesta de arreglo y cómo comprobarlo.
+Los tres hallazgos de las pruebas con el modelo real del 19 de septiembre —el orquestador y la
+clave `Pasos`, el caché que guardaba el plan de respaldo, y los agentes que no leían la
+conversación— están cerrados y documentados en las filas #22, #23 y #24. El documento de
+traspaso que los seguía (`PENDIENTES_AGENTES.md`) se eliminó al quedarse sin pendientes
+abiertos; sus mediciones de despliegue viven en [`DEPLOY.md`](DEPLOY.md) §3.1.
 
 | # | Tema | Por qué importa | Arreglo propuesto |
 |---|---|---|---|
@@ -643,13 +646,13 @@ orquestador, el caché y la memoria con su evidencia, su propuesta de arreglo y 
 | 15 | Batería de prompt injection end-to-end contra el endpoint | Es el 15% del total del Reto 1 | Script con ataques propios sobre el endpoint desplegado |
 | 16 | ✅ **HECHO en `adea37f`.** El verificador está declarado en `agent_card.json` | ADL cruza los ids de `agentes_invocados` y `tokens_por_agente` contra la ficha | — |
 | 17 | ✅ **HECHO en `adea37f`.** La tabla del corpus no se cachea vacía | Antes, si el volumen del índice no estaba al llegar la primera petición, el tablero quedaba en blanco hasta reiniciar | Los endpoints responden `disponible: false` |
-| 18 | **`FRONTEND.md` contradice al backend en 7 puntos** (§14): `fenomeno=` vs `fenomenos=`, citas con `quote`/`score`, `chart: "map"`, `lugar`, `group_by: "mes"`, fechas completas, `/api/graph` | Quien construya el tablero con esa guía escribirá código que el backend rechaza o ignora | Corregir `FRONTEND.md` con la tabla de §14 |
+| 18 | ✅ **RESUELTO.** `FRONTEND.md` contradecía al backend en 9 puntos (§14): `fenomeno=` vs `fenomenos=`, citas con `quote`/`score`, `chart: "map"`, `lugar`, `group_by: "mes"`, fechas completas, `/api/graph`, `static/` vs `src/ui/static/`, Plotly/Leaflet vs Chart.js | Quien construyera el tablero con esa guía escribía código que el backend rechaza o ignora | Corregido con la tabla de §14: estructura real de archivos, vocabulario cerrado del `ViewSpec`, campos reales de `citations`, endpoints con sus parámetros verdaderos. La tabla de §14 se conserva como registro de qué decía antes |
 | 19 | ✅ `/api/trace` **cerrado en `86e8244`** (solo con `ARPIA_DEBUG_TRACE`). El resto de `/api/*` sigue siendo público y de solo lectura, en los tres dominios | Lo público ya no expone preguntas ni salidas del modelo | Confirmar que `ARPIA_DEBUG_TRACE` queda vacío en Coolify |
 | 20 | ✅ **Resuelto en el chat.** Antes el chat no usaba `/api/evidence`: hacer clic en una cita no abría el fragmento, y faltaban el tooltip y el visor que sugirió ADL | `FRONTEND.md` lo llama "requisito obligatorio de la especificación" | `js/referencias.js` (tooltip y visor), `obtenerEvidencia` y `obtenerDocumento` en `api.js`, enganche en `chat.js`. Detalle en §14, "Referencias". El tablero también las usa (respuestas del asistente y sección "Fuente") |
 | 21 | ✅ **Resuelto con el presupuesto de tiempo (#6).** Timeout del front (90 s) vs peor caso del backend | — | — |
 | 22 | ✅ **Resuelto.** El orquestador fallaba con el modelo real: `gpt-oss-120b` devolvía la clave `Pasos` (el `title` del esquema) y `Plan` (`extra="forbid"`) la rechazaba, con lo que el respaldo mandaba todo al documental. Medido antes: 1 de 6 llamadas válidas; después: 6 de 6, y las tres preguntas típicas responden por `/chat` con el agente correcto | — | `plan.py`: `Plan` y `Paso` normalizan las claves (`Pasos` → `pasos`, `Group By` → `group_by`) y siguen rechazando campos inexistentes. `plan_de_respaldo` manda el conteo inequívoco al analítico (y suma el visualizador si piden una gráfica). `executors._dimension` ya no depende de las tildes. No se añadió reintento: la causa raíz está cerrada y cada reintento costaría tokens |
 | 23 | ✅ **Resuelto.** El caché guardaba como buena la respuesta del plan de respaldo (`estado: ok`) y repetir la pregunta la devolvía con `cache:1.00` hasta reiniciar | — | `planificar` anota `turnlog.marcar_no_cacheable("plan_de_respaldo")` en sus dos salidas al respaldo y `run_chat` no guarda en el caché un turno marcado (queda en el log). El `estado` sigue siendo `ok`. Cualquier agente puede usar la misma marca para otros degradados |
-| 24 | ✅ **Resuelto.** Ningún agente leía la conversación: el historial se guardaba en SQLite pero `planificar` y `redactar` solo recibían la pregunta, así que un seguimiento ("resúmelo", "¿y en 2023?") buscaba la frase literal y respondía sobre otro tema | ADL evalúa preguntas sueltas (no cambia la nota); el chat de la demo sí lo necesita | `memory.conversacion_previa` arma las últimas 2 vueltas (400 caracteres por mensaje, sin mensajes de tools ni la pregunta actual). `planificar` y `redactar` la reciben y el orquestador reescribe el seguimiento como consulta autónoma. **Primer turno de una sesión: cero tokens extra.** Límite conocido: el redactor no obedece del todo un formato como "en una frase" |
+| 24 | ✅ **Resuelto.** Ningún agente leía la conversación: el historial se guardaba en SQLite pero `planificar` y `redactar` solo recibían la pregunta, así que un seguimiento ("resúmelo", "¿y en 2023?") buscaba la frase literal y respondía sobre otro tema | ADL evalúa preguntas sueltas (no cambia la nota); el chat de la demo sí lo necesita | `memory.conversacion_previa` arma las últimas 2 vueltas (400 caracteres por mensaje, sin mensajes de tools ni la pregunta actual). `planificar` y `redactar` la reciben y el orquestador reescribe el seguimiento como consulta autónoma. **Primer turno de una sesión: cero tokens extra.** Límite conocido: el redactor no obedece del todo un formato como "en una frase" |
 | 25 | ✅ **Resuelto.** Una comparación entre dos temas perdía uno de los lados: la evidencia de los pasos se ordenaba por puntaje y el redactor (que ve 8 fragmentos) recibía 8 de IA y **0 de satélites**; la respuesta afirmaba que el corpus no decía nada sobre satélites. Medido contra el despliegue y reproducido con el índice real | Toda pregunta de comparación ("compara…") con temas de puntajes distintos daba una respuesta falsa | `graph.ejecutar` intercala la evidencia por pasos (cada uno aporta su mejor fragmento por turnos) en vez de ordenarla globalmente. Con un solo paso el orden es el de siempre |
 | 26 | ✅ **Resuelto.** Una pregunta fuera de dominio ("¿quién ganó el Mundial?") hacía que el orquestador respondiera en texto ("Lo siento, pero…"), el JSON no validaba, caía al respaldo documental, buscaba material sin relación y gastaba **8.879 tokens** para una respuesta rara | Eficiencia (tokens) y tono | `Plan.pasos = []` es ahora la forma de declarar una consulta ajena (regla en el prompt del orquestador). El grafo responde `voz.FUERA_DE_DOMINIO` sin buscar ni redactar: **1.121 tokens**, 1 llamada. En una replanificación un plan vacío sigue siendo un fallo, y ante la duda se planifica el documental (una pregunta general sobre satélites SÍ es del dominio) |
 | 27 | ✅ **Resuelto.** El redactor ignoraba un formato pedido ("resúmelo en una sola frase"): la estructura fija (conclusión, desarrollo, lo no cubierto) siempre ganaba | Relevancia de la respuesta | `REDACCION_PROMPT` gana "FORMATO PEDIDO": una extensión o forma explícita manda sobre la estructura. Costo: cero tokens |
@@ -659,10 +662,23 @@ orquestador, el caché y la memoria con su evidencia, su propuesta de arreglo y 
 
 - `arpia-bundle/AGENTS.md` §7 dice "código bajo Apache 2.0 / repo público" y habla de un
   "gateway"; **`RETO.md` manda**: repositorio **privado**, modelos vía LiteLLM/Bedrock.
-- `src/api/CONTRATO_GRAFO.md`: describe el grafo anterior; los "tres problemas de memoria"
-  que enumera ya los corrigió la Fase 3.
-- `FRONTEND.md`: es una guía para la sesión del frontend y **discrepa del backend real**
-  (ver la tabla de §14). Ubica los archivos en `static/`; la ruta real es `src/ui/static/`.
+
+Corregidos el 19 de septiembre, ya alineados con el código:
+
+- `src/api/CONTRATO_GRAFO.md`: los "tres problemas de memoria" que enumeraba los cerró la
+  Fase 3 (el nodo `begin` de `graph.py`). Ahora describe la solución que está en el código.
+- `FRONTEND.md`: discrepaba del backend en los nueve puntos de §14. Reescritas las secciones
+  de estructura, endpoints, `ViewSpec` y contrato de `citations`.
+- `README.md` (este repo y el raíz): la estructura de `src/` estaba incompleta y presentaban
+  Streamlit como la interfaz del sistema, cuando lo que se despliega es `src/ui/static/`.
+- `arpia-bundle/CLAUDE.md` y `AGENTS.md`: declaraban Streamlit como frontend del proyecto y
+  listaban módulos de tema que ya no existen.
+
+Eliminados el 19 de septiembre, por describir cosas que dejaron de existir:
+
+- `PENDIENTES_AGENTES.md` (traspaso sin pendientes abiertos), `docs/design/reference-notes.md`,
+  `arpia-bundle/docs/architecture.md` (stub de redirección), los cinco resúmenes de las
+  conferencias de la Etapa 2, y las skills `streamlit-app-design` y `data-viz-plotly`.
 
 ---
 
@@ -731,7 +747,7 @@ dónde esa guía no coincide con el backend.
 | `dashboard.html`, `css/tablero.css`, `js/dashboard.js`, `js/viewspec.js` | ✅ existen; el tablero abre con datos reales y sin datos de ejemplo |
 | `vendor/` | Chart.js ✅ en uso; Leaflet sigue en el repo pero **ya no se carga** (el corpus no tiene lugar) |
 | `charts.js`, `map.js`, `graph.js` | ➖ no existen ni hacen falta: los gráficos viven en `dashboard.js`; mapa y grafo no tienen datos |
-| Streamlit (`src/ui/app.py`) | sigue en el repo pero **ya no se despliega** |
+| Streamlit (`src/ui/app.py`) | ➖ **eliminado** (19-sep): la interfaz es `src/ui/static/`. Con él se fueron `streamlit_theme.py`, `plotly_theme.py` y las dependencias `streamlit`, `plotly` y `pandas` |
 
 - **HTML plano, sin framework, sin build.** `chat.html` no tiene ninguna referencia externa
   (verificado): sirve aunque la red del venue falle. `FRONTEND.md` prohíbe CDN y exige

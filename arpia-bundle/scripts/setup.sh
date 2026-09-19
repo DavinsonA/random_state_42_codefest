@@ -25,9 +25,6 @@ if [ ! -f .env ]; then
   echo "!!  .env creado desde plantilla — COMPLETA LLM_API_KEY antes de continuar"
 fi
 
-echo "--> generando .streamlit/config.toml desde los design tokens"
-uv run python -c "from src.theme.streamlit_theme import write_config_toml; write_config_toml()"
-
 echo "--> verificando tokens visuales"
 uv run python -c "
 from src.theme.tokens import tokens
@@ -54,6 +51,7 @@ PY
 echo ""
 echo "==> listo."
 echo "    (comandos relativos a $ARPIA_ROOT)"
-echo "    UI:   uv run streamlit run src/ui/app.py"
-echo "    API:  uv run uvicorn src.api.main:app --reload --port 8000"
+echo "    API + interfaces: uv run uvicorn src.api.main:app --reload --port 8000"
+echo "        chat:    http://localhost:8000/"
+echo "        tablero: http://dashboard.localhost:8000/"
 echo "    Nodo: uv run python $BUNDLE_ROOT/scripts/run_node.py --list"

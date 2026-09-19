@@ -1,9 +1,9 @@
 """Endpoints de soporte del tablero (Reto 2).
 
-Los consume el HTML estatico de `static/`, que mantiene otra sesion. No los
-evalua ADL directamente —lo que se evalua es que el tablero muestre el
-componente correcto con los datos correctos— pero son la unica via por la que
-esos datos llegan al navegador.
+Los consume el HTML estatico de `src/ui/static/` (`dashboard.js`, `viewspec.js`,
+`referencias.js`). No los evalua ADL directamente —lo que se evalua es que el
+tablero muestre el componente correcto con los datos correctos— pero son la
+unica via por la que esos datos llegan al navegador.
 
 Dos reglas, las mismas que en `/chat`:
 

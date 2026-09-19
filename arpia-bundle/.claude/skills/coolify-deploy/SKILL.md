@@ -27,12 +27,19 @@ sistema ausente en la imagen slim, o una variable de entorno sin configurar.
 Coolify. Esto es criterio de calificacion explicito, no solo buena practica.
 Lista de variables requeridas: `.env.example`.
 
-## API y UI en la misma imagen
-El `Dockerfile` arranca la API por defecto. Para la UI, sobrescribir el comando
-en el panel de Coolify:
+## Un contenedor, tres dominios
+La API y las dos interfaces salen del MISMO proceso: no hay un segundo comando
+ni un segundo puerto que configurar en el panel. `src/api/routing.py` decide que
+HTML sirve en `/` segun la cabecera `Host`:
+
 ```
-streamlit run src/ui/app.py --server.port 8501 --server.address 0.0.0.0
+agent.<equipo>....       -> POST /chat, lo que evalua ADL
+frontagent.<equipo>....  -> el chat (Reto 1)
+dashboard.<equipo>....   -> el tablero (Reto 2)
 ```
+
+Los tres dominios apuntan al mismo recurso de Coolify, al puerto 8000. Menos
+piezas que puedan caerse durante la ventana de evaluacion.
 
 ## Depuracion
 - Lee los logs de build **y** de runtime en el panel; el fallo suele estar en

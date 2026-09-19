@@ -48,11 +48,3 @@ def test_ningun_hex_literal_fuera_de_theme():
         for m in HEX_RE.finditer(path.read_text("utf-8", errors="ignore")):
             ofensores.append(f"{path.relative_to(ROOT)}: {m.group(0)}")
     assert not ofensores, "colores literales fuera de src/theme/: " + "; ".join(ofensores)
-
-
-def test_plotly_template_usa_tokens():
-    from src.theme.plotly_theme import build_template
-
-    layout = build_template().layout
-    assert layout.paper_bgcolor == tokens.foundation.background
-    assert layout.plot_bgcolor == tokens.foundation.surface

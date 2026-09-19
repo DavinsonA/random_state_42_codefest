@@ -45,10 +45,10 @@ al contenedor.
   ignora. Sus volúmenes (`hf-cache`, `estado`, `./data`) hay que recrearlos en la pestaña
   *Storages* de Coolify.
 - El chat y el tablero son **HTML estático** que sirve la propia API desde `src/ui/static/`; ese
-  directorio entra a la imagen con `COPY . .`. Hoy existe `chat.html` (sin ninguna referencia
-  externa, así que no depende de un CDN); **`dashboard.html` y `vendor/` no existen**, por lo que
-  el dominio `dashboard.*` responde 200 con un aviso. Streamlit (8501) ya no se despliega, aunque
-  `src/ui/app.py` sigue en el repo.
+  directorio entra a la imagen con `COPY . .`. Existen `chat.html` y `dashboard.html`, ninguno
+  con referencias externas: Chart.js va vendorizado en `vendor/` y las fuentes se sirven
+  localmente, así que la interfaz no depende de ningún CDN. No hay ninguna otra interfaz: el
+  Streamlit que hubo (`src/ui/app.py`) se eliminó el 19 de septiembre.
 - La API expone además los endpoints del tablero (`/api/components`, `/api/aggregate`,
   `/api/timeline`, `/api/geo`, `/api/evidence/{chunk_id}`, `/api/trace/{trace_id}`). Salen por el
   mismo puerto 8000 y por los tres dominios, incluido `agent.*`.
@@ -66,11 +66,11 @@ Ordenados por gravedad. **Ninguno está corregido todavía.**
 | 3 | **Sin encoder no hay recuperación.** Los pesos de `bge-m3` (~2,2 GB) se descargan de Hugging Face al arrancar | Si el servidor de ADL no llega a `huggingface.co`, fallan la búsqueda vectorial **y** el caché semántico. El PDF pide imagen autosuficiente en *modelos* | Incluir el modelo en la imagen al construirla (decisión D3) |
 | 4 | **`requirements.txt` instala CUDA que no se usa.** Trae 15 paquetes `nvidia-*` y `triton`, porque `uv export` resuelve el `torch` de GPU en Linux. El encoder corre con `device="cpu"` | Builds lentos y pesados, más disco, riesgo de *timeout* al construir. *Tamaño exacto: **no medido** (estimado en varios GB)* | Instalar `torch` desde el índice CPU de PyTorch y excluir `nvidia-*`/`triton`. **Medir construyendo la imagen localmente** |
 | 5 | ✅ **Resuelto en `adea37f`.** El arranque precalienta índice, tabla y encoder, así que `/health` ya no carga 1,3 GB en su primera llamada | Antes podía exceder los 5 s del healthcheck y marcar como fallido un despliegue que solo estaba cargando | Queda verificar el tiempo de arranque **en el servidor de ADL** (§8) |
-| 6 | **Docs contradictorios.** `deploy-test/README.md` dice que el repo será *público*; el skill `coolify-deploy` habla de Streamlit en 8501 | El PDF exige repo **privado**; con deploy key, Coolify a veces no persiste el *Base Directory* y hay que volver a fijarlo en *Build settings* | Corregirlos y borrar `deploy-test/` antes de la entrega (su propio README lo pide) |
+| 6 | ✅ **RESUELTO.** `deploy-test/` se borró y el skill `coolify-deploy` ya no habla de Streamlit en 8501 | El PDF exige repo **privado**; con deploy key, Coolify a veces no persiste el *Base Directory* y hay que volver a fijarlo en *Build settings* | Hecho. Lo del *Base Directory* sigue siendo una trampa del panel: verificarlo tras cada cambio de credenciales |
 | 7 | **Auto Deploy.** Por defecto Coolify redespliega en cada `push` a la rama configurada | Un `push` entre 08:00 y 12:30 tumba el endpoint que se está evaluando | Apagar *Auto Deploy* desde las 08:00, o desplegar desde una rama `release` que solo se toque al congelar |
-| 8 | **`dashboard.html` no existe** (ni `vendor/` con Plotly y Leaflet). `routing.py` responde 200 con un aviso en `dashboard.*` | El Reto 2 no se puede desplegar ni evaluar (55% ejecución dinámica, 40% propuesta de diseño). Como el HTML entra en la imagen, cualquier ajuste posterior exige reconstruirla | Cerrarlo antes del congelamiento. Añadirlo a la lista de verificación (§7) |
+| 8 | ✅ **RESUELTO.** `dashboard.html` y `vendor/` existen; el tablero abre con datos reales del corpus y sin datos de ejemplo | El Reto 2 ya se puede desplegar y evaluar (55% ejecución dinámica, 40% propuesta de diseño) | Hecho. Sigue valiendo la advertencia: el HTML entra en la imagen, así que **cualquier ajuste posterior exige reconstruirla** |
 | 9 | ✅ **Cacheo corregido en `adea37f`**: la tabla del tablero ya no se guarda vacía; los endpoints responden `disponible: false` si el índice no está. El orden de arranque sigue importando | Si el índice llega tarde, el tablero muestra "no disponible" en vez de quedar en blanco hasta reiniciar | El script de descarga (D2) debe terminar de dejar el índice **antes** de iniciar `uvicorn` |
-| 10 | **La imagen instala dependencias de UI que la API no usa.** `streamlit`, `plotly` y `pandas` figuran como dependencias, pero solo las importan `src/ui/app.py` y `src/theme/` | Más peso y más tiempo de build. *Tamaño exacto: **no medido*** | Moverlas a un extra opcional (p. ej. `ui`) y excluirlas del export de producción (ver D4) |
+| 10 | ✅ **RESUELTO (19-sep).** La imagen ya no instala dependencias de UI. `streamlit`, `plotly` y `pandas` salieron de `pyproject.toml` junto con los módulos que los usaban (`src/ui/app.py`, `src/theme/streamlit_theme.py`, `src/theme/plotly_theme.py`) | La interfaz es `src/ui/static/` —HTML plano y Chart.js vendorizado— y no necesita ninguno de los tres. `pandas` no lo importaba nadie | Hecho: `requirements.txt` regenerado con `uv export`. *Reducción de tamaño: **no medida*** |
 | 11 | **Endpoints `/api/*` públicos y de solo lectura en los tres dominios**, incluido `agent.*`. `/api/trace` (que exponía preguntas y salidas del modelo) **se cerró en `86e8244`**: solo responde con `ARPIA_DEBUG_TRACE` | Que `ARPIA_DEBUG_TRACE` quede encendido por error en Coolify | Dejarla **vacía** en el despliegue evaluado (`/health` advierte si `debug_trace` está activo) |
 
 **Dato medido por el equipo** (comentario del `Dockerfile`): índice + encoder ≈ **3,8 GB de
@@ -170,9 +170,9 @@ documento, no una decisión del equipo.
 - **Recomendación: sí.** Ahorra tiempo y disco de build. Pendiente **medir** el tamaño real de
   la imagen antes y después (hay Docker 29.7 instalado en la máquina de desarrollo, así que
   se puede hacer sin gastar presupuesto de tokens).
-- **Ampliación:** `streamlit`, `plotly` y `pandas` (problema #10) solo los usa `src/ui/app.py` y
-  `src/theme/`, no la API. Excluirlas del export de producción reduciría aún más la imagen.
-  Antes de quitarlas hay que confirmar que ningún camino de producción importe `src/theme/`.
+- **Las dependencias de UI ya no están** (problema #10, cerrado el 19-sep): `streamlit`,
+  `plotly` y `pandas` se eliminaron junto con los módulos que las importaban. Lo que queda por
+  decidir aquí es solo el `torch` de CPU y los paquetes `nvidia-*`.
 
 ### D5 — ¿Rama de despliegue?
 
@@ -290,7 +290,7 @@ cuota responde `200` con una página HTML, y sin esa comprobación el fallo ser�
 - [ ] `GET /api/evidence/<chunk_id de una cita real>` devuelve el fragmento.
 - [ ] Una pregunta real por `POST /chat` con `mode: "live"` y `estado: "ok"`.
 - [ ] *Auto Deploy* apagado. Nadie hace `push` a la rama desplegada hasta las 12:30.
-- [ ] `deploy-test/` eliminado del repo.
+- [x] `deploy-test/` eliminado del repo.
 
 ## 8. Qué no se ha verificado
 
@@ -301,7 +301,6 @@ Para que nadie lo dé por sabido:
 - El tamaño real de la imagen (con y sin CUDA).
 - El nombre de equipo definitivo en los dominios.
 - Cuánto tarda el primer arranque **en el servidor de ADL** (en la máquina de desarrollo: 473 s con descarga; carga posterior, segundos).
-- Cuánto pesan `streamlit`, `plotly` y `pandas` en la imagen.
-- Si `dashboard.html` (y `vendor/`) estarán listos antes del congelamiento.
+- Cuánto se redujo la imagen al sacar `streamlit`, `plotly` y `pandas` (19-sep). No se midió antes ni después.
 - Que Coolify acepte los tres dominios sobre un mismo recurso con el mismo puerto (es lo
   esperable por la documentación de ADL, pero no se ha probado en su panel).
