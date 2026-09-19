@@ -96,6 +96,54 @@ def recuperar(
     return hits
 
 
+def citar_documentos(doc_ids: list[str]) -> list[dict]:
+    """Deja constancia de documentos concretos del corpus como citas del turno.
+
+    Es el equivalente de `recuperar` para las cifras: un conteo por
+    organizacion no recupera fragmentos, pero cada cifra descansa sobre
+    documentos reales. `RETO.md` exige que todo dato mostrado se rastree a su
+    `doc_id` y `chunk_id`; sin esto, una respuesta cuantitativa salia con
+    `citations` vacio aunque el sistema conocia los documentos detras de cada
+    numero.
+
+    Para cada documento registra su PRIMER fragmento, con su texto real: es la
+    evidencia textual que un experto puede abrir (`GET /api/evidence/{chunk_id}`).
+
+    **No fuerza la carga del indice.** Un indice sin cargar son 1,3 GB y varios
+    segundos; en produccion ya esta cargado, porque la tabla de agregados sale de
+    el. Si no lo esta, o si falla, devuelve `[]`: una cita que no se pudo obtener
+    no debe tumbar un conteo exacto.
+
+    Args:
+        doc_ids: identificadores de documento (`F2-CSIS-014`).
+
+    Returns:
+        Las citas registradas, en el orden pedido. Vacia si no fue posible.
+    """
+    if not doc_ids:
+        return []
+    try:
+        indice = _get_index()
+        if not indice.stats():
+            return []
+        filas = indice.documents_meta(doc_ids)
+    except Exception:  # noqa: BLE001 - una cita ausente no debe tumbar el conteo
+        return []
+
+    citas = [
+        {
+            "doc_id": d,
+            "chunk_id": filas[d]["chunk_id"],
+            "fuente": filas[d].get("organizacion") or filas[d].get("fuente"),
+            "fragmento": str(filas[d].get("texto", ""))[:240],
+        }
+        for d in doc_ids
+        if d in filas and filas[d].get("chunk_id")
+    ]
+    turnlog.add_citations(citas)
+    return citas
+
+
 @registry.register(span_type="retrieval")
 def buscar_corpus(query: str, k: int = 8, fenomeno: str = "") -> str:
     """Busca fragmentos relevantes en el corpus documental indexado.

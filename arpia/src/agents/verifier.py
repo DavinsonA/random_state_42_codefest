@@ -105,7 +105,14 @@ def diagnosticar(respuesta: str, evidencia: list[dict[str, Any]]) -> Diagnostico
     documental = [e for e in evidencia if not str(e.get("chunk_id", "")).startswith("agregado:")]
 
     citadas = set(_DOC_ID.findall(respuesta or ""))
-    disponibles = {str(e.get("doc_id", "")) for e in documental if e.get("doc_id")}
+    # Para decidir si una cita es FABRICADA, cuenta TODA la evidencia. El `chunk_id`
+    # agregado es sintetico, pero los `doc_id` que el analitico lista como muestra
+    # de cada cifra son documentos reales, y ese agente los cita en su texto
+    # (`RETO.md`: todo dato mostrado se rastrea a su `doc_id`). Si no contaran,
+    # cada respuesta cuantitativa trazable se leeria como "cita fabricada" y se
+    # reescribiria con un modelo. En cambio, la OBLIGACION de citar (`sin_citas`)
+    # sigue mirando solo la evidencia documental.
+    disponibles = {str(e.get("doc_id", "")) for e in evidencia if e.get("doc_id")}
     # Un doc_id agregado puede venir como "F1-A, F1-B": se separa para comparar.
     disponibles = {parte.strip() for d in disponibles for parte in d.split(",") if parte.strip()}
 

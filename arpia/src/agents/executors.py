@@ -39,6 +39,10 @@ UMBRAL_EVIDENCIA = 0.50
 #: Fragmentos que se entregan al redactor.
 TOP_K = 8
 
+#: Documentos que se citan como respaldo de cada cifra de un conteo. Es una
+#: muestra: el conteo es el total, y la lista completa sale de `/api/aggregate`.
+MUESTRA_POR_CIFRA = 3
+
 REDACCION_PROMPT = """Eres el analista documental de A.R.P.I.A. Redactas la
 respuesta a partir de la evidencia recuperada del corpus.
 
@@ -282,27 +286,63 @@ def analitico(paso: Paso) -> Resultado:
         return Resultado(agente=AGENTE_ANALITICO, suficiente=False)
 
     unidad = "fragmentos" if metrica == "conteo_fragmentos" else "documentos"
-    lineas = "\n".join(f"- {f['clave']}: {f['valor']:,} {unidad}".replace(",", ".") for f in filas)
     cobertura = resultado["cobertura"]
+
+    def cifra(f: dict[str, Any]) -> str:
+        return f"{f['clave']}: {f['valor']:,} {unidad}".replace(",", ".")
+
+    def muestra(f: dict[str, Any]) -> list[str]:
+        """Documentos reales que sustentan la cifra. La cifra es el conteo TOTAL;
+        esto es una muestra, no la lista completa (citar los 425 documentos de
+        una organizacion saturaria la respuesta)."""
+        return f["doc_ids"][:MUESTRA_POR_CIFRA]
+
+    # `RETO.md`: todo dato mostrado debe rastrearse a su `doc_id`. Cada cifra
+    # del texto cita los documentos que la sustentan; antes el texto salia sin un
+    # solo identificador aunque el sistema los conocia.
+    lineas = "\n".join(
+        f"- {cifra(f)}" + (f" (ej.: {', '.join(muestra(f))})" if muestra(f) else "") for f in filas
+    )
     aviso = ""
     if cobertura["sin_dato_en_la_dimension"]:
         aviso = (
-            f"\n\n{cobertura['sin_dato_en_la_dimension']} de "
+            f"{cobertura['sin_dato_en_la_dimension']} de "
             f"{cobertura['documentos_en_dimension']} documentos no declaran "
             f"{group_by} y quedan fuera de este conteo."
         )
+
+    # Lo que ADL llama `retrieval_context`: lo que se uso para armar la respuesta.
+    # Faithfulness se calcula contra este campo; con el vacio, cada cifra del texto
+    # se juzga como una afirmacion sin sustento. Una linea por cifra, mas la
+    # cobertura, porque el texto tambien la afirma.
+    contexto = [
+        f"(agregado por {group_by}) {cifra(f)}. Documentos de ejemplo: {', '.join(muestra(f))}"
+        for f in filas
+    ]
+    if aviso:
+        contexto.append(f"(agregado por {group_by}) {aviso}")
+    turnlog.add_context(contexto)
+
+    # Una cita estructurada por cifra: el primer documento de su muestra, con el
+    # texto real de su primer fragmento (evidencia que un experto puede abrir).
+    from src.tools.corpus import citar_documentos
+
+    citar_documentos([m[0] for f in filas if (m := muestra(f))])
+
     return Resultado(
         agente=AGENTE_ANALITICO,
-        texto=f"Conteo de {unidad} por {group_by}:\n{lineas}{aviso}",
+        texto=f"Conteo de {unidad} por {group_by}:\n{lineas}" + (f"\n\n{aviso}" if aviso else ""),
+        # TODAS las filas que muestra el texto, no las 10 primeras: una cifra sin
+        # evidencia detras es justo lo que el verificador tiene que poder detectar.
         evidencia=[
             {
                 "chunk_id": f"agregado:{group_by}:{f['clave']}",
-                "doc_id": ", ".join(f["doc_ids"][:3]),
+                "doc_id": ", ".join(muestra(f)),
                 "texto": f"{f['clave']}: {f['valor']} {unidad}",
                 "score": 1.0,
                 "citacion": f"conteo exacto sobre {cobertura['documentos_contados']} documentos",
             }
-            for f in filas[:10]
+            for f in filas
         ],
         suficiente=True,  # un conteo exacto es evidencia por si mismo
     )
