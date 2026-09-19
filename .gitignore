@@ -11,7 +11,7 @@ __pycache__/
 .streamlit/secrets.toml
 
 # Datos e indices: se montan, no se versionan
-data/*
+data/
 !data/.gitkeep
 *.faiss
 *.jsonl
