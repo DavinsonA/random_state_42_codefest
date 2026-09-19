@@ -20,6 +20,9 @@ services:
       # en vez de fallar.
       - ./data:/app/data:ro
       - hf-cache:/app/.cache/huggingface
+      # Estado mutable (memoria conversacional). Separado de ./data a proposito:
+      # el corpus va en solo lectura para que el indice no pueda corromperse.
+      - estado:/app/state
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx;httpx.get('http://localhost:8000/health')"]
       interval: 30s
@@ -31,3 +34,4 @@ services:
 
 volumes:
   hf-cache:
+  estado:

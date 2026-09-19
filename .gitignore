@@ -10,6 +10,11 @@ __pycache__/
 .env
 .streamlit/secrets.toml
 
+# Estado mutable en ejecucion: memoria conversacional del grafo
+state/
+*.sqlite
+*.sqlite3
+
 # Datos e indices: se montan, no se versionan
 data/
 !data/.gitkeep
