@@ -4,7 +4,7 @@
 > ADL*; este documento dice *qué hay construido, cómo funciona y qué falta*.
 > Ante conflicto con la Especificación Técnica de ADL, manda la de ADL.
 >
-> Fecha de corte: `main` @ `299494a` — Fases 1 a 5 y frontend del chat (19 de septiembre de 2026).
+> Fecha de corte: `main` @ `4ae60f9` + trazabilidad de los conteos (19 de septiembre de 2026).
 > Si cambias el contrato o el comportamiento de un endpoint, **actualiza este archivo
 > en el mismo commit**. Un documento desactualizado es peor que ninguno.
 
@@ -35,10 +35,12 @@
 | Chat web (`chat.html`), sin CDN | ✅ hecho | `src/ui/static/` |
 | Tablero web (`dashboard.html`) y librerías vendorizadas (Plotly, Leaflet) | ❌ **no existen**: `dashboard.*` muestra un aviso (§14) | `src/ui/static/` |
 
-**Lo más importante que hay que saber:** el backend está construido y sus 238 pruebas
-pasan, **pero todas usan modelos falsos**. Dos fallos que las pruebas originales no veían
-ya están corregidos (§12 #1 y #2: nombre de modelo y metadata en planes paralelos). Falta
-probar el grafo con el modelo real (#3) antes de las 08:00, y **el tablero web aún no
+**Lo más importante que hay que saber:** el backend está construido y sus 267 pruebas
+pasan; **casi todas usan modelos falsos**, y con el modelo real solo hay pruebas manuales
+(§11). Esas pruebas manuales, hechas el 19 de septiembre con el índice de la Etapa 1, el
+encoder `bge-m3` y LiteLLM, **funcionan de punta a punta** (pregunta documental, cuantitativa
+y de vista) y confirmaron los arreglos de §12 #1 y #2. Encontraron además dos fallos nuevos
+que ninguna prueba con modelo falso podía ver (§12 #22 y #23). **El tablero web aún no
 existe**: hay endpoints de datos (`/api/*`) pero no `dashboard.html`, así que el dominio
 `dashboard.*` hoy muestra un aviso (§14).
 
@@ -58,7 +60,8 @@ existe**: hay endpoints de datos (`/api/*`) pero no `dashboard.html`, así que e
 | `GET /api/timeline` | Serie anual de documentos, con su cobertura | Tablero |
 | `GET /api/geo` | **Siempre `disponible: false`**: el corpus no tiene lugar | Tablero |
 | `GET /api/evidence/{chunk_id}` | El fragmento exacto detrás de una cita | Tablero, chat |
-| `GET /api/trace/{trace_id}` | Árbol de ejecución de un turno reciente | Nosotros (depurar) |
+| `GET /api/trace/{trace_id}` | Árbol de ejecución de un turno reciente. **Cerrado por defecto**: solo responde con `ARPIA_DEBUG_TRACE` (expone preguntas, fragmentos y salidas del modelo) | Nosotros (depurar) |
+| `POST /api/view` | Resuelve un `ViewSpec` a los datos que el tablero debe pintar, validándolo contra el mismo esquema cerrado del visualizador | Tablero |
 
 ### Regla dura: nunca un 500 ni un 422
 
@@ -80,6 +83,8 @@ Existe y devuelve, sin autenticación:
 | `gateway_reachable` | LiteLLM responde (solo alcanzabilidad de red, no valida la key ni el modelo) |
 | `agent_card_loaded`, `agentes_registrados` | la card cargó y qué ids expone |
 | `memoria_persistente` | el checkpointer escribe en disco; `false` = la memoria vive en RAM |
+| `max_llamadas_por_turno` | tope real de llamadas al modelo por turno, calculado desde los topes del grafo (reemplaza al antiguo `max_iterations`, que ya nadie aplicaba) |
+| `debug_trace` | `true` si `/api/trace` está publicado; `/health` advierte si queda encendido |
 | `tools_registered`, `warnings` | tools disponibles y avisos legibles |
 
 Los endpoints `/api/*` siguen la misma regla: **siempre 200**; un fallo o un dato
@@ -298,8 +303,25 @@ detecta un problema.
 | Agente | Qué hace | Tokens |
 |---|---|---|
 | `agente_documental` | recupera del corpus con `corpus.recuperar()` (sobre-recupera k=40 y aplica filtro **blando** por fenómeno); la redacción es `componer` | 0 aquí |
-| `agente_analitico` | conteos exactos sobre la tabla de 1.826 documentos vía `aggregates.agregar`; la dimensión se elige por palabras clave, **sin SQL ni modelo**; declara siempre la cobertura y lo que deja fuera | 0 |
+| `agente_analitico` | conteos exactos sobre la tabla de 1.826 documentos vía `aggregates.agregar`; la dimensión la fija el plan (`Paso.group_by`) y la heurística por palabras clave es solo el respaldo; **sin SQL ni modelo**. **Cada cifra cita 3 documentos de muestra** y el turno deja `citations` y `retrieval_context` (ver abajo) | 0 |
 | `agente_visualizador` | pide un `ViewSpec` al modelo pequeño con salida estructurada y catálogo real (`componentes_disponibles`); una vista inválida se descarta y el turno sigue; impone la `nota` de cobertura temporal | 1 llamada |
+
+**Trazabilidad de las cifras.** `RETO.md` exige que todo dato mostrado se rastree a su `doc_id` y
+`chunk_id` (PDF §3.3 y B.1.3 para los datos de un componente y las variables derivadas como
+`organizacion` y `anio`). Un conteo no recupera fragmentos, pero cada cifra descansa sobre documentos
+reales, así que `analitico` los hace visibles por construcción:
+
+- **En el texto:** `- CSIS_Aerospace: 214 documentos (ej.: F2-CSIS-014, F2-CSIS-015, F2-CSIS-016)`. La cifra
+  es el conteo **total**; los tres documentos son una muestra (`MUESTRA_POR_CIFRA`), no la lista completa.
+- **En `citations`:** una cita por cifra, con el `chunk_id` del primer fragmento de ese documento y su texto
+  real (`corpus.citar_documentos`); se abre con `GET /api/evidence/{chunk_id}`. No fuerza la carga del índice
+  (si no está cargado o falla, no cita y el conteo sigue).
+- **En `retrieval_context`:** una línea por cifra (`(agregado por organizacion) CSIS_Aerospace: 214 documentos.
+  Documentos de ejemplo: …`), más la cobertura si el texto la afirma. Faithfulness se calcula contra este campo;
+  vacío, cada cifra del texto se juzga como una afirmación sin sustento. *Interpretación del equipo:* el PDF
+  dice que el campo aplica "si el agente hizo uso de recuperación"; no está confirmado cómo trata ADL un campo
+  vacío en una respuesta cuantitativa.
+- **La evidencia cubre todas las filas del texto** (antes solo las 10 primeras).
 
 Un ejecutor **nunca lanza**: un fallo degrada el turno, no lo tumba. Añadir un agente es
 registrar una función con `@registrar`, no tocar el grafo.
@@ -348,6 +370,13 @@ devolver una cita inventada. Se descartó "puntaje de recuperación bajo" como d
 pregunta fuera de dominio puntúa 0,552 y la peor legítima 0,606; cinco centésimas no separan
 nada. `GET /usage` expone `verificador` (turnos, activaciones, tasa): si la tasa se acerca a
 1, el disparador está mal puesto y se paga una llamada extra por turno.
+
+**Conteos exactos.** La evidencia agregada del analítico (`chunk_id` sintético `agregado:…`) no se
+somete a la exigencia de citar: `sin_citas` mira solo la evidencia documental. Pero los `doc_id` de muestra
+que el analítico cita **sí cuentan como disponibles** para decidir si una cita es fabricada, porque son
+documentos reales. Sin esto, cada respuesta cuantitativa trazable se leería como "cita fabricada" y se
+reescribiría con un modelo. La trazabilidad de las cifras la garantiza el propio agente (§5.3), no una
+revisión con modelo.
 
 ⚠️ El verificador **no está declarado en la agent card** pero aparece en `agentes_invocados`
 y en `tokens_por_agente` cuando llama al modelo (§12 #16).
@@ -457,7 +486,7 @@ credenciales nunca van en el código ni en la imagen.
 | `CHECKPOINT_PATH` | archivo SQLite de la memoria conversacional | `state/checkpoints.sqlite` |
 | `AGENT_CARD_PATH` | ruta de la card | `agent_card.json` |
 | `SESSION_TTL_S` | vida de la cookie de sesión | `3600` |
-| `MAX_AGENT_ITERATIONS` | tope de iteraciones | `6` |
+| `ARPIA_DEBUG_TRACE` | publica `GET /api/trace` (preguntas, fragmentos y salidas del modelo). **Solo desarrollo; vacío en el despliegue evaluado** | vacío |
 | `REQUEST_TIMEOUT_S` | timeout de **cada** llamada al modelo | `60` |
 | `LOG_LEVEL` | nivel de log | `INFO` |
 
@@ -511,10 +540,10 @@ cp .env.example .env                                        # y rellenar; ARPIA_
 uv run uvicorn src.api.main:app --reload --port 8000
 
 uv run ruff check src tests --fix && uv run ruff format src tests
-uv run pytest tests -q                                      # 238 casos
+uv run pytest tests -q                                      # 267 casos
 ```
 
-238 casos en total (algunas funciones están parametrizadas; la columna cuenta funciones).
+267 casos en total (algunas funciones están parametrizadas; la columna cuenta funciones).
 
 | Archivo de pruebas | Qué protege | Funciones |
 |---|---|---|
@@ -529,7 +558,8 @@ uv run pytest tests -q                                      # 238 casos
 | `test_guardian.py` | ataques rechazados **y** consultas legítimas que no deben rechazarse | 11 |
 | `test_enrich.py` | `organizacion` y `anio` derivados | 8 |
 | `test_dashboard.py` | endpoints `/api/*`: nunca 500, cobertura, trazabilidad, `geo` no disponible | 13 |
-| `test_verifier.py` | disparadores del verificador, degradación y que no salte en respuestas sanas | 11 |
+| `test_verifier.py` | disparadores del verificador, degradación y que no salte en respuestas sanas ni en conteos | 12 |
+| `test_trazabilidad_analitico.py` | cada cifra cita sus documentos; `citations` y `retrieval_context` llenos; el verificador no reescribe un conteo trazable; el conteo no se cae si el índice falla | 12 |
 | `test_theme.py` | ningún color hexadecimal fuera de `src/theme/` | 6 |
 
 > Las pruebas de `test_graph.py` cuentan llamadas con **contadores del LLM falso**; no leen
@@ -537,11 +567,22 @@ uv run pytest tests -q                                      # 238 casos
 > `test_e2e_metadata.py` sí lo leen (y se comprobó que fallan si el bug se reinstala).
 > Sigue sin detectarse lo de §12 #4 (`tools_called` del documental).
 
-### Prueba de escritorio con modelo real (única hecha, previa a las Fases 3, 4 y 5)
+### Pruebas manuales con el modelo real (19 de septiembre)
 
-`POST /chat` con `"Hola mundo"`, `ARPIA_MODE=live`, `gpt-oss-20b` vía LiteLLM: HTTP 200,
-formato ADL completo, `tokens.total` = input + output (741), `X-Session-Id` devuelto.
-**El grafo actual (plan + ejecutores) aún no se ha probado con el modelo real.**
+Con el índice de la Etapa 1 (326.866 fragmentos), `bge-m3` en CPU y LiteLLM (`gpt-oss-120b`,
+`gpt-oss-20b`, `llama-3.3-70b-instruct`), servidor en modo `live`:
+
+| Pregunta | Resultado |
+|---|---|
+| Documental ("¿qué reporta el corpus sobre capacidades antisatélite?") | 12 s, 3.561 tokens, respuesta redactada con `doc_id` reales, 8 fragmentos en `retrieval_context` y 8 citas |
+| Cuantitativa ("¿cuántos documentos hay por fenómeno?") | antes de `c9f48f5`: 3 s, 896 tokens, 1 llamada, F3 = 888, F2 = 479, F1 = 459 (suman 1.826). **Después: falla el orquestador (§12 #22)** |
+| Vista ("grafica la cantidad de documentos por organizacion") | `ViewSpec` válido con `gpt-oss-20b`; con la trazabilidad de §5.3: 2.342 tokens, sin llamar al verificador, 20 cifras con 20 citas y 20 líneas de contexto |
+| Seguimiento ("resúmelo en una sola frase") | **no usa la conversación**: ningún agente lee el historial (§12 #24) |
+| Caché semántico | un acierto sirvió la respuesta en 0 tokens |
+
+Confirmado con el proxy real: la traducción de modelos (§6), la salida estructurada del `Plan` y del
+`ViewSpec`, y `memoria_persistente: true`. **No confirmado:** el comportamiento con las preguntas
+que evaluará ADL (batería propia de preguntas y ataques) ni la carga concurrente.
 
 ---
 
@@ -549,15 +590,18 @@ formato ADL completo, `tokens.total` = input + output (741), `X-Session-Id` devu
 
 Ordenados por impacto en la nota. Los #1 a #4 salieron de revisar el código de las Fases 3
 y 4 y no los detectaban las pruebas originales. **#1 y #2 ya están corregidos**; #3 y #4
-siguen abiertos. Del #9 al #13 se atendieron con la Fase 5 (ver cada fila); del #16 al #21
-son nuevos.
+siguen abiertos. Del #9 al #13 se atendieron con la Fase 5 (ver cada fila); del #16 al #24
+son nuevos (el #22, #23 y #24 salieron de las pruebas con el modelo real).
+
+Para quien lleva los agentes: [`PENDIENTES_AGENTES.md`](PENDIENTES_AGENTES.md) resume los hallazgos del
+orquestador, el caché y la memoria con su evidencia, su propuesta de arreglo y cómo comprobarlo.
 
 | # | Tema | Por qué importa | Arreglo propuesto |
 |---|---|---|---|
 | 1 | ✅ **CORREGIDO.** **El modelo del documental no existe en LiteLLM.** La card dice `llama-3.3-70b-instruct`; LiteLLM acepta `meta.llama3-3-70b-instruct`. `redactar()` captura la excepción y entrega fragmentos crudos con `estado: ok` | En `live`, **toda** respuesta documental saldría sin redactar: se pierden Tono (25%) y Answer Relevancy. Falla en silencio | Hecho: `card.gateway_model_for` traduce el nombre de la card al id de LiteLLM (§6); lo reportado sigue siendo el nombre de la card. Override en Coolify con `MODEL_ALIASES`. Falta confirmar con una llamada real de 1 token |
 | 2 | ✅ **CORREGIDO.** **Se pierde la metadata en planes paralelos.** `graph.ejecutar` usa `ThreadPoolExecutor` y los `ContextVar` de `turnlog`/`usage` no llegan a esos hilos. Demostrado: con 2 pasos, `tools_called=[]`, `tokens_por_agente=[]`, `num_interacciones=0` | Un plan con 2+ pasos (comparaciones, "datos + vista") pierde `retrieval_context` (**Faithfulness, 30% del Bloque A**), `citations` y los tokens del visualizador (Bloque B) | Hecho: cada tarea corre con `contextvars.copy_context().run`, más candados en `usage`/`turnlog`. Pruebas en `test_paralelo.py` y `test_e2e_metadata.py` |
-| 3 | **Nada probado con el modelo real.** `with_structured_output(Plan)` y `(ViewSpec)` dependen de que LiteLLM y `gpt-oss` soporten salida estructurada | Si falla, el orquestador cae siempre al plan de respaldo y el visualizador nunca emite vista (55% del Reto 2) | Prueba en `live` con `gpt-oss-20b` (barata) sobre 1 pregunta documental, 1 cuantitativa y 1 de vista |
-| 4 | **`tools_called` no refleja la recuperación.** El documental llama a `recuperar()` directo, no a la tool `buscar_corpus`; el stub sí la anota. El orquestador tampoco anota `delegar_*` | La card promete `buscar_corpus` y `delegar_*`; la traza no los muestra. Es una inconsistencia detectable en el Bloque D | Anotar `buscar_corpus` dentro de `recuperar()`, y o bien anotar `delegar_*` en `planificar` o ajustar la card a lo que existe |
+| 3 | ✅ **Probado con el modelo real (19-sep).** La salida estructurada del `Plan` y del `ViewSpec` funciona en LiteLLM con `gpt-oss`, con una excepción (#22) | — | Falta una batería propia de preguntas y ataques |
+| 4 | ✅ **HECHO en `c9f48f5`.** `recuperar()` registra `buscar_corpus` en `tools_called`; comprobado con el modelo real | — | El orquestador sigue sin anotar `delegar_*` |
 | 5 | **Índice y encoder en Coolify** | Sin índice, `/chat` cae siempre a `error_grafo` | Crear los 3 *Storages* de §10 y las variables como *Runtime* |
 | 6 | **Tope de tiempo por turno** | Hoy cada llamada tiene 60 s; el peor caso son 3 llamadas más recuperación. Un turno que exceda el timeout del evaluador se pierde | Plazo global por turno en `run_chat` que degrade a `_retrieval_fallback` |
 | 7 | **El caché ignora la conversación.** Compara solo el texto: "¿y en 2023?" puede recibir la respuesta cacheada de otra conversación | Devuelve una respuesta de otra pregunta con `estado: cache:0.96` | No cachear turnos que dependan del historial (con hilo previo), o incluir el hilo en la clave |
@@ -572,9 +616,12 @@ son nuevos.
 | 16 | **El verificador no está en la agent card** pero aparece en `agentes_invocados` y `tokens_por_agente` | ADL cruza esos ids contra la ficha; un id no declarado es una inconsistencia detectable en el Bloque D | Declararlo en `agent_card.json` (y en `agent_ids()`), o atribuir su consumo a `agente_documental` |
 | 17 | **La tabla del tablero se cachea vacía si el índice no está** (`aggregates.tabla`) y `/api/aggregate` responde `disponible: true` con `filas: []` | Si la primera petición llega antes de que el volumen del índice esté montado, el tablero queda vacío **hasta reiniciar**, sin aviso | No cachear el fallo; responder `disponible: false` cuando la tabla esté vacía |
 | 18 | **`FRONTEND.md` contradice al backend en 7 puntos** (§14): `fenomeno=` vs `fenomenos=`, citas con `quote`/`score`, `chart: "map"`, `lugar`, `group_by: "mes"`, fechas completas, `/api/graph` | Quien construya el tablero con esa guía escribirá código que el backend rechaza o ignora | Corregir `FRONTEND.md` con la tabla de §14 |
-| 19 | **`/api/*` y `/api/trace` son públicos y sin autenticación** en los tres dominios (incluido `agent.*`) | `trace` expone entradas y salidas de los spans de turnos recientes | Revisar qué incluye un span y decidir si `trace` debe quedar solo en desarrollo |
+| 19 | ✅ `/api/trace` **cerrado en `86e8244`** (solo con `ARPIA_DEBUG_TRACE`). El resto de `/api/*` sigue siendo público y de solo lectura, en los tres dominios | Lo público ya no expone preguntas ni salidas del modelo | Confirmar que `ARPIA_DEBUG_TRACE` queda vacío en Coolify |
 | 20 | **El chat no usa `/api/evidence`**: `api.js` no tiene esa función, así que hacer clic en una cita no abre el fragmento | `FRONTEND.md` lo llama "requisito obligatorio de la especificación" | Añadir `obtenerEvidencia(chunk_id)` a `api.js` y enlazarlo en `chat.js` |
 | 21 | **Timeout del front (90 s) vs peor caso del backend**: 3 llamadas × 60 s más recuperación pueden superar 90 s | El front mostraría "tardó demasiado" aunque el backend termine bien | Se resuelve con el plazo global por turno (#6) |
+| 22 | **El orquestador falla en las preguntas cuantitativas de un solo paso con el modelo real.** `gpt-oss-120b` devuelve la clave `Pasos` (el `title` que pydantic pone a la propiedad `pasos` en el esquema) y `Plan` (`extra="forbid"`) la rechaza; se usa el plan de respaldo, que **siempre** manda al documental. Reproducido de forma determinista con "¿Cuántos documentos hay por fenómeno?" y "¿Cuántos documentos publica cada organización?"; las preguntas documentales y de vista sí se planifican bien | La pregunta cuantitativa más típica se contesta por búsqueda semántica ("no se proporciona un número") en vez de con el conteo exacto. Es el agente que da los puntos extra | Aceptar `Pasos`/`pasos` (validador `mode="before"` que normalice las claves) y/o quitar los `title` del esquema; que `plan_de_respaldo` mande a `agente_analitico` cuando la pregunta sea de conteo |
+| 23 | **El caché semántico guarda como buena la respuesta del plan de respaldo** (`estado: ok`) | Un fallo transitorio del modelo queda congelado: repetir la pregunta devuelve la respuesta mala con `cache:1.00` hasta reiniciar | No cachear turnos cuyo plan fue de respaldo |
+| 24 | **Ningún agente lee la conversación.** El historial se guarda en SQLite pero `planificar(pregunta)` y `redactar(pregunta, evidencia)` solo reciben el texto de la pregunta | Una pregunta de seguimiento se responde sin contexto y gasta tokens (4.442 en la prueba); ADL evalúa preguntas sueltas, pero el chat real las necesita | Pasar las últimas vueltas al orquestador y al redactor |
 
 ### Documentos del repo que están desactualizados
 
@@ -607,6 +654,10 @@ son nuevos.
   `ViewSpec` recortado a lo que el corpus soporta; cobertura del 34% declarada siempre.
 - **Un contenedor, tres dominios.** Menos piezas que puedan caerse en la ventana de
   evaluación.
+- **Trazabilidad por construcción, no por revisión.** Toda cifra que se muestra cita los documentos que la
+  sustentan (§5.3). Se descartó eximir a los conteos de citar: `RETO.md` exige rastrear "todo dato mostrado" a
+  su `doc_id` y `chunk_id`, y el verificador solo detecta el hueco, no lo cierra. El ahorro de tokens que
+  resulta (el verificador ya no se activa en un conteo trazable) es una consecuencia, no el objetivo.
 
 ### Historia (para ubicar los commits)
 
@@ -623,6 +674,10 @@ son nuevos.
 | `1c1466e` Fase 5 | verificador condicional, traza consultable (`/api/trace`) y endpoints del tablero (`dashboard.py`) |
 | `01efafa` (PR #3) | corrige el modelo del documental (nombre de la card → id de LiteLLM) y la metadata perdida en planes paralelos |
 | `5c83a71` | frontend del chat en HTML plano (`src/ui/static/`), sin CDN |
+| `c9f48f5` | `tools_called` registra la recuperación; `agentes_invocados` incluye al analítico; `Paso.group_by` |
+| `8d96e8d` | el verificador no exige citas a la evidencia agregada; `cobertura.excluidos_por_fecha` |
+| `86e8244` | `/api/trace` cerrado por defecto; `POST /api/view` |
+| `4ae60f9` | preflight en verde; `/health` expone `max_llamadas_por_turno` |
 
 ---
 
@@ -666,7 +721,8 @@ Todos devuelven **HTTP 200**. Un fallo o un dato inexistente llega como
 | `GET /api/timeline` | `fenomenos`, `desde`, `hasta` | serie anual ordenada, `granularidad: "anio"`, `cobertura` y un `aviso` con el 34% |
 | `GET /api/geo` | — | **siempre `disponible: false`**: la metadata no tiene lugar, país ni coordenadas |
 | `GET /api/evidence/{chunk_id}` | — | `chunk_id`, `doc_id`, `texto`, `fuente`, `organizacion`, `anio`, `formato`, `fenomeno`, `fenomeno_nombre` |
-| `GET /api/trace/{trace_id}` | — | `spans` del turno (solo las últimas 50 trazas) |
+| `GET /api/trace/{trace_id}` | — | `spans` del turno (últimas 50 trazas). **Solo con `ARPIA_DEBUG_TRACE`**; si no, `disponible: false` |
+| `POST /api/view` | cuerpo: un `ViewSpec` | los datos ya resueltos: `filas`, `total`, `cobertura`, `aviso`, `nota`. Valida con el mismo esquema cerrado que el visualizador; una vista temporal agrupa por año |
 
 Cada cifra viene con los `doc_id` que la sustentan, y `/api/evidence` abre el fragmento
 exacto: es la trazabilidad que exige `RETO.md`.

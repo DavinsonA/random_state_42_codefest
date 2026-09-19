@@ -7,7 +7,7 @@
 > exige ADL en [`../RETO.md`](../RETO.md).
 >
 > Estado: **análisis hecho, nada modificado todavía** (ni `Dockerfile` ni `compose`).
-> Fecha de corte: `main` @ `299494a` (Fases 1 a 5 y frontend del chat), 19 de septiembre de 2026.
+> Fecha de corte: `main` @ `4ae60f9`, 19 de septiembre de 2026.
 
 ---
 
@@ -71,12 +71,27 @@ Ordenados por gravedad. **Ninguno está corregido todavía.**
 | 8 | **`dashboard.html` no existe** (ni `vendor/` con Plotly y Leaflet). `routing.py` responde 200 con un aviso en `dashboard.*` | El Reto 2 no se puede desplegar ni evaluar (55% ejecución dinámica, 40% propuesta de diseño). Como el HTML entra en la imagen, cualquier ajuste posterior exige reconstruirla | Cerrarlo antes del congelamiento. Añadirlo a la lista de verificación (§7) |
 | 9 | **El tablero depende del índice y cachea el fallo.** `aggregates.tabla()` se construye desde el índice; si no está, guarda una tabla **vacía** y no reintenta hasta reiniciar. `/api/aggregate` responde `disponible: true` con `filas: []` | Si el índice llega después de que arranque `uvicorn` (script de descarga, volumen que se monta tarde), el tablero queda vacío **sin ningún aviso** hasta el próximo reinicio | El arranque debe **terminar de dejar el índice en su sitio antes de iniciar `uvicorn`** (ver D2). Y corregir el cacheo en `aggregates.py` (`API.md` §12 #17) |
 | 10 | **La imagen instala dependencias de UI que la API no usa.** `streamlit`, `plotly` y `pandas` figuran como dependencias, pero solo las importan `src/ui/app.py` y `src/theme/` | Más peso y más tiempo de build. *Tamaño exacto: **no medido*** | Moverlas a un extra opcional (p. ej. `ui`) y excluirlas del export de producción (ver D4) |
-| 11 | **Endpoints `/api/*` sin autenticación en los tres dominios**, incluido `agent.*`. `/api/trace/{trace_id}` devuelve entradas y salidas de los spans de turnos recientes | Exposición innecesaria en el dominio que evalúa ADL | Decidir si `trace` queda solo en desarrollo (`API.md` §12 #19) |
+| 11 | **Endpoints `/api/*` públicos y de solo lectura en los tres dominios**, incluido `agent.*`. `/api/trace` (que exponía preguntas y salidas del modelo) **se cerró en `86e8244`**: solo responde con `ARPIA_DEBUG_TRACE` | Que `ARPIA_DEBUG_TRACE` quede encendido por error en Coolify | Dejarla **vacía** en el despliegue evaluado (`/health` advierte si `debug_trace` está activo) |
 
 **Dato medido por el equipo** (comentario del `Dockerfile`): índice + encoder ≈ **3,8 GB de
 RAM por proceso**. Con 8 GB de contenedor, dos workers rozan el límite.
 
 ---
+
+### 3.1 Medido en una prueba local completa (19 de septiembre)
+
+Con el índice de la Etapa 1 y `bge-m3` en CPU, en una máquina de desarrollo:
+
+- **Carga del índice:** 4 s en la primera llamada a `/health` (límite del healthcheck: 5 s). Sigue siendo el
+  problema #5: en el servidor de ADL, con otro disco, puede pasar el límite.
+- **Encoder:** la primera carga (descarga incluida) tardó **473 s**. Después, segundos.
+- **Pesos duplicados:** el snapshot de `BAAI/bge-m3` trae `model.safetensors` **y** `pytorch_model.bin`
+  (2,12 GB cada uno), y Hugging Face guarda además un caché de fragmentos: **8,6 GB en disco** para un modelo
+  que solo necesita una copia. Para la imagen (D3) hay que descargar solo `model.safetensors` y los archivos de
+  tokenizador y configuración (`allow_patterns`), y limpiar el caché de fragmentos.
+- **`torch`:** en Windows resolvió `2.14.0+cpu`; el `requirements.txt` generado para Linux arrastra 15 paquetes
+  `nvidia-*` (problema #4). Confirma que el encoder no necesita CUDA.
+- **Flujo real de punta a punta funcionando** contra LiteLLM (ver `API.md` §11).
 
 ## 4. Configuración propuesta del recurso en Coolify (borrador)
 
@@ -145,6 +160,7 @@ documento, no una decisión del equipo.
 | **A. Dentro de la imagen** (descarga en el *build*) | Sin dependencia de internet en ejecución; cumple "imagen autosuficiente" | Imagen +2,2 GB |
 | B. Volumen persistente (`HF_HOME`), se baja al primer arranque | Imagen más liviana | Si el servidor no llega a Hugging Face, **no hay recuperación** |
 
+- **Medido:** el snapshot completo pesa 8,6 GB por tener los pesos duplicados (§3.1); con una sola copia son ~2,1 GB.
 - **Recomendación: A.** El *build* ya necesita internet para `pip`; si llega a PyPI, es muy
   probable que llegue a Hugging Face, pero **no está verificado**.
 
@@ -220,7 +236,7 @@ Para que nadie lo dé por sabido:
 - Si ese servidor tiene salida a `huggingface.co` y a `download.pytorch.org`.
 - El tamaño real de la imagen (con y sin CUDA).
 - El nombre de equipo definitivo en los dominios.
-- Cuánto tarda el primer arranque con el índice y el encoder reales.
+- Cuánto tarda el primer arranque **en el servidor de ADL** (en la máquina de desarrollo: 473 s con descarga; carga posterior, segundos).
 - Cuánto pesan `streamlit`, `plotly` y `pandas` en la imagen.
 - Si `dashboard.html` (y `vendor/`) estarán listos antes del congelamiento.
 - Que Coolify acepte los tres dominios sobre un mismo recurso con el mismo puerto (es lo
