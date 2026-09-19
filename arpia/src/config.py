@@ -27,6 +27,7 @@ class Settings:
     request_timeout_s: int
     log_level: str
     arpia_mode: str
+    session_ttl_s: int
 
     @property
     def llm_configured(self) -> bool:
@@ -50,6 +51,7 @@ def get_settings() -> Settings:
         request_timeout_s=int(os.getenv("REQUEST_TIMEOUT_S", "60")),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         arpia_mode=mode,
+        session_ttl_s=int(os.getenv("SESSION_TTL_S", "3600")),
     )
 
 

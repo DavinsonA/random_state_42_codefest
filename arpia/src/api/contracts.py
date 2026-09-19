@@ -216,9 +216,10 @@ class AgentResponse(BaseModel):
     view_spec: ViewSpec | None = Field(None, description="Presente solo si el turno pide vista.")
 
 
-#: Alias historico. El nombre de la clase no viaja en el JSON, pero hay codigo
-#: y pruebas que la importan asi.
+#: Alias historicos. El nombre de la clase no viaja en el JSON, pero hay codigo
+#: y pruebas que las importan asi. `TokenCount` era el nombre de `Tokens`.
 ChatResponse = AgentResponse
+TokenCount = Tokens
 
 
 # -- GET /topics (uso interno del frontend; no lo evalua ADL) ---------------

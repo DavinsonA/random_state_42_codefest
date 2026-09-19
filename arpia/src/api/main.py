@@ -4,20 +4,19 @@ Este es el artefacto que consume el pipeline de evaluacion de ADL: se mide la
 aplicacion desplegada, no el repositorio. El contrato de `POST /chat` esta en
 `src/api/contracts.py` y sigue la especificacion tecnica de la Etapa 2 (§2.4).
 
-Regla dura de esta API: **ningun camino devuelve 500 ni 422**. Un fallo interno,
-una dependencia caida o un cuerpo malformado se reportan como degradacion
+Este modulo solo enruta y reporta estado. El turno de conversacion vive en
+`src/api/chat.py`; la frontera con el grafo, en `src/api/CONTRATO_GRAFO.md`.
+
+Regla dura: **ningun camino devuelve 500 ni 422**. Un fallo interno, una
+dependencia caida o un cuerpo malformado se reportan como degradacion
 (`status`, `metadata.estado`) dentro de una respuesta 200 bien formada. Un 422
 delante del evaluador puntua cero en esa pregunta; una respuesta degradada y
 explicada, no.
-
-Los esquemas viven en `src/api/contracts.py`, no aqui.
 """
 
 from __future__ import annotations
 
-import json
 import threading
-import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
@@ -25,17 +24,10 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from src.agents import guardian, memory
 from src.agents.card import agent_ids, load_card
-from src.api import routing, stub
-from src.api.contracts import (
-    AgentResponse,
-    ChatRequest,
-    Evaluacion,
-    HealthResponse,
-    Metadata,
-    UsageResponse,
-)
+from src.api import chat as chat_mod
+from src.api import routing, session
+from src.api.contracts import AgentResponse, HealthResponse, UsageResponse
 from src.config import get_logger, get_settings
 from src.observability import tracing, usage
 from src.retrieval import encoder
@@ -48,7 +40,7 @@ log = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Calienta el encoder local al arrancar, en segundo plano.
 
-    La primera carga de bge-m3 descarga ~2 GB y tarda minutos. Si eso ocurre
+    La primera carga de bge-m3 descarga ~2 GB y tarda ~90 s. Si eso ocurre
     dentro de la peticion de un evaluador, se le cobra como latencia —o se cae
     por timeout—. Aqui se paga una vez, mientras el contenedor arranca, y en un
     hilo aparte para que `/health` responda de inmediato: Coolify necesita saber
@@ -56,8 +48,7 @@ async def lifespan(app: FastAPI):
 
     En modo stub no se carga nada: no hay nada real que codificar.
     """
-    s = get_settings()
-    if not s.is_stub:
+    if not get_settings().is_stub:
         threading.Thread(target=encoder.warmup, name="encoder-warmup", daemon=True).start()
     yield
 
@@ -65,11 +56,18 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="A.R.P.I.A.", version="0.1.0", lifespan=lifespan)
 
 
-# -- helpers ---------------------------------------------------------------
+# -- helpers de estado ------------------------------------------------------
 
 
 def _check_index() -> tuple[bool, str | None]:
-    """Indice cargado y alineado con su metadata. Nunca lanza."""
+    """Indice cargado y alineado con su metadata. Nunca lanza.
+
+    En modo stub NO se carga: el indice ocupa 1,3 GB y en stub no se usa para
+    nada. Coolify llama a `/health` cada 30 s, y la primera llamada dejaria esa
+    memoria reservada para siempre sin que nadie la aproveche.
+    """
+    if get_settings().is_stub:
+        return False, "modo stub: el indice no se carga"
     try:
         from src.tools.corpus import _get_index
 
@@ -91,175 +89,45 @@ def _check_gateway(base_url: str) -> tuple[bool, str | None]:
         return False, f"{type(exc).__name__}: {exc}"
 
 
-def _degradada(
-    texto: str,
-    estado: str,
-    mensaje: str,
-    latencia_ms: int,
-    agentes: list[str] | None = None,
-) -> AgentResponse:
-    """Respuesta valida cuando no se produjo una real. Mantiene los tres
-    bloques: el evaluador siempre recibe algo que puede parsear y calificar.
-
-    `num_interacciones` y `tokens` quedan en cero, que es la verdad: no hubo
-    llamada al modelo.
-    """
-    return AgentResponse(
-        respuesta=mensaje,
-        evaluacion=Evaluacion(input=texto, actual_output=mensaje),
-        metadata=Metadata(estado=estado, latencia_ms=latencia_ms, agentes_invocados=agentes or []),
-        mode=get_settings().arpia_mode,  # type: ignore[arg-type]
-    )
-
-
-def _secretos() -> tuple[str, ...]:
-    """Valores que jamas pueden aparecer en una respuesta."""
-    s = get_settings()
-    return tuple(v for v in (s.llm_api_key, s.llm_base_url) if v)
-
-
-async def _leer_consulta(request: Request) -> ChatRequest:
-    """Extrae la consulta del cuerpo, venga como venga. Nunca lanza.
-
-    La agent card declara `input_modes: ["text/plain"]` y la especificacion
-    admite "texto plano o JSON", asi que el endpoint acepta las dos formas y
-    varios alias de campo. Cualquier cuerpo que no se entienda produce una
-    consulta vacia, que el endpoint convierte en una respuesta cortes con 200.
-    """
-    try:
-        crudo = await request.body()
-    except Exception:  # noqa: BLE001 - frontera: leer el cuerpo nunca tumba /chat
-        return ChatRequest()
-    if not crudo:
-        return ChatRequest()
-
-    try:
-        datos = json.loads(crudo)
-    except (ValueError, UnicodeDecodeError):
-        return ChatRequest(texto=crudo.decode("utf-8", errors="replace"))
-
-    if isinstance(datos, str):  # JSON que es solo una cadena
-        return ChatRequest(texto=datos)
-    if isinstance(datos, dict):
-        try:
-            return ChatRequest.model_validate(datos)
-        except Exception:  # noqa: BLE001 - un esquema inesperado no puede ser un 422
-            log.warning("cuerpo JSON con forma inesperada: %s", sorted(datos)[:6])
-            return ChatRequest()
-    return ChatRequest()
-
-
-# -- nunca un 422 ----------------------------------------------------------
+# -- nunca un 422 -----------------------------------------------------------
 
 
 @app.exception_handler(RequestValidationError)
 async def _sin_422(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Cuerpo malformado -> 200 con respuesta degradada, no 422.
 
-    El evaluador envia el cuerpo que decida su pipeline. Si no lo entendemos,
-    el fallo es nuestro y se reporta en `metadata.estado`, no se castiga la
-    pregunta con un error de esquema.
+    Es una red de seguridad: `chat.parse_body` ya acepta JSON y texto plano, asi
+    que en la practica no deberia dispararse. Si se dispara, el fallo es
+    nuestro y se reporta en `metadata.estado`, no se castiga la pregunta.
     """
     log.warning("cuerpo no parseable en %s: %s", request.url.path, exc.errors()[:2])
-    respuesta = _degradada(
-        "",
-        "entrada_no_parseable",
-        "No pude leer el cuerpo de la peticion. Envia un JSON con el campo "
-        '"texto" (o "message"/"query") con tu consulta.',
-        0,
-    )
-    return JSONResponse(status_code=200, content=respuesta.model_dump())
+    return JSONResponse(status_code=200, content=chat_mod.invalid_input_response().model_dump())
 
 
-# -- endpoints -------------------------------------------------------------
+# -- endpoints --------------------------------------------------------------
 
 
 @app.post("/chat", response_model=AgentResponse)
-async def chat(request: Request) -> AgentResponse:
+async def chat(request: Request, response: Response) -> AgentResponse:
     """Endpoint que evalua ADL. Devuelve los tres bloques del contrato §2.4.
 
-    Acepta JSON (`{"texto": ...}` y alias) o `text/plain`, como declara la
-    agent card. En `ARPIA_MODE=stub` responde con datos simulados y marcados,
-    sin tocar indice ni gateway: cero tokens del presupuesto. En `live`
-    (Fase 3 en adelante) delega en el orquestador.
+    Acepta JSON (`{"texto": ...}` y alias) o `text/plain`, como declara la agent
+    card. El `sesion_id` se resuelve por cuerpo, header `X-Session-Id` o cookie,
+    y si no hay ninguno el servidor emite uno nuevo (ver `src/api/session.py`).
+
+    El turno corre en un hilo del pool: el grafo y el encoder son bloqueantes y
+    no pueden ocupar el bucle de eventos mientras ADL manda preguntas en
+    paralelo.
     """
-    inicio = time.perf_counter()
-    req = await _leer_consulta(request)
-    tracing.start_trace()
-    usage.start_request()
-    registry.reset()
-    texto = (req.texto or "").strip()
+    raw = await request.body()
+    req = chat_mod.parse_body(raw)
 
-    def _ms() -> int:
-        return int((time.perf_counter() - inicio) * 1000)
+    sid, es_nueva = session.resolve_session(req.sesion_id if req else None, request)
+    session.attach_session(response, sid, es_nueva, get_settings().session_ttl_s)
 
-    if not texto:
-        return _degradada(
-            texto,
-            "entrada_vacia",
-            "No recibi ninguna consulta. Preguntame sobre inteligencia artificial "
-            "en entornos militares, seguridad del entorno espacial o dinamicas "
-            "territoriales, y te respondo con la evidencia del corpus.",
-            _ms(),
-        )
-
-    s = get_settings()
-    try:
-        # 1. Guardian. Determinista y primero: un ataque no debe llegar ni al
-        #    cache ni al modelo. Cuesta cero tokens rechazarlo aqui.
-        veredicto = guardian.revisar_entrada(texto)
-        if not veredicto.permitido:
-            return _degradada(
-                texto,
-                f"rechazado:{veredicto.categoria}",
-                veredicto.texto,
-                _ms(),
-                agentes=[guardian.AGENTE],
-            )
-        texto = veredicto.texto
-
-        # 2. Memoria. Un acierto ahorra el turno completo.
-        cacheada = memory.cache.buscar(texto)
-        if cacheada is not None:
-            cacheada.metadata.latencia_ms = _ms()
-            return cacheada
-
-        # 3. Ejecucion.
-        if s.is_stub:
-            respuesta = await run_in_threadpool(stub.stub_response, texto, latencia_ms=_ms())
-        else:
-            # Fase 3: aqui entra el orquestador. Hasta entonces `live` no tiene
-            # nada que ejecutar y lo dice, en vez de fingir una respuesta real.
-            return _degradada(
-                texto,
-                "live_no_implementado",
-                "El modo real aun no esta habilitado en esta version del servicio.",
-                _ms(),
-            )
-
-        # 4. Guardian de salida: ultima barrera antes de devolver.
-        salida = guardian.revisar_salida(respuesta.respuesta, _secretos())
-        if not salida.permitido:
-            return _degradada(
-                texto,
-                f"rechazado:{salida.categoria}",
-                salida.texto,
-                _ms(),
-                agentes=[guardian.AGENTE],
-            )
-
-        memory.cache.guardar(texto, respuesta)
-        respuesta.metadata.latencia_ms = _ms()
-        return respuesta
-    except Exception as exc:  # noqa: BLE001 - frontera: /chat nunca propaga
-        log.exception("fallo no controlado en /chat")
-        return _degradada(
-            texto,
-            f"error_interno:{type(exc).__name__}",
-            "Ocurrio un fallo interno procesando la consulta. El servicio sigue "
-            "operativo; intenta de nuevo o reformula la pregunta.",
-            _ms(),
-        )
+    if req is None or not req.texto.strip():
+        return chat_mod.invalid_input_response()
+    return await run_in_threadpool(chat_mod.run_chat, req.texto, sid)
 
 
 @app.get("/agent-card")
@@ -336,6 +204,8 @@ def usage_endpoint() -> UsageResponse:
     funcionar. Este numero es solo lo que el propio proceso observo, no la
     facturacion real (esa la manda el dashboard de LiteLLM).
     """
+    from src.agents import memory
+
     summary = usage.usage_summary()
     return UsageResponse(
         requests=usage.request_count(),

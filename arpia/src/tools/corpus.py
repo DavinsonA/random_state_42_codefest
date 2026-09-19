@@ -1,5 +1,10 @@
 """Tools sobre el corpus documental.
 
+Los nombres coinciden EXACTAMENTE con los declarados en `agent_card.json`.
+No es cosmetica: `evaluacion.tools_called` reporta el nombre de la funcion, y
+ADL evalua el bloque de diseno contra la agent card. Una tool que se llama de
+una forma en la card y de otra en la traza es una inconsistencia detectable.
+
 Plantilla de referencia: el docstring de cada funcion es el texto que lee el
 modelo. Copien esta estructura al escribir tools nuevas el dia del evento.
 """
@@ -8,6 +13,7 @@ from __future__ import annotations
 
 import os
 
+from src.observability import turnlog
 from src.retrieval.index import VectorIndex
 from src.tools.registry import registry
 
@@ -22,7 +28,7 @@ def _get_index() -> VectorIndex:
 
 
 @registry.register(span_type="retrieval")
-def search_corpus(query: str, k: int = 8) -> str:
+def buscar_corpus(query: str, k: int = 8) -> str:
     """Busca fragmentos relevantes en el corpus documental indexado.
 
     Usar cuando la pregunta requiera evidencia textual del corpus: hechos,
@@ -53,20 +59,34 @@ def search_corpus(query: str, k: int = 8) -> str:
         f"[{i}] ({hit.citation()}) score={hit.score:.3f}\n{hit.text}"
         for i, hit in enumerate(hits, start=1)
     ]
+    # Lo que ADL llama `retrieval_context`: el texto que se le entrego al modelo,
+    # con su procedencia para que las citas del modelo tengan respaldo.
+    turnlog.add_context([f"({hit.citation()}) {hit.text}" for hit in hits])
+    turnlog.add_citations(
+        [
+            {
+                "doc_id": hit.doc_id,
+                "chunk_id": hit.chunk_id,
+                "fuente": hit.metadata.get("organizacion") or hit.metadata.get("fuente"),
+                "fragmento": hit.text[:240],
+            }
+            for hit in hits
+        ]
+    )
     return "\n\n".join(bloques)
 
 
 @registry.register
-def list_documents(doc_ids: list[str]) -> str:
+def detalle_documento(doc_ids: list[str]) -> str:
     """Devuelve los metadatos conocidos de una lista de documentos.
 
     Usar para confirmar la procedencia de documentos ya identificados por una
     busqueda previa (fuente, formato, fenomeno asociado).
 
-    NO usar para descubrir documentos nuevos: para eso esta `search_corpus`.
+    NO usar para descubrir documentos nuevos: para eso esta `buscar_corpus`.
 
     Args:
-        doc_ids: identificadores exactos, tal como los devolvio `search_corpus`.
+        doc_ids: identificadores exactos, tal como los devolvio `buscar_corpus`.
 
     Returns:
         Una linea por documento con sus metadatos, o aviso de no encontrado.

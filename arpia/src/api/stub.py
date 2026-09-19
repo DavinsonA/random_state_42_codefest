@@ -1,16 +1,22 @@
-"""Respuesta simulada para `ARPIA_MODE=stub`.
+"""Turno simulado para `ARPIA_MODE=stub`.
 
 Existe para una sola cosa: poder desplegar y validar el contrato HTTP completo
 antes de tener indice, gateway o agentes. La forma del JSON es IDENTICA a la de
-modo `live` —mismos bloques, mismos tipos, mismo desglose de tokens— pero nada
-de aqui toca `src.retrieval` ni el gateway del evento, y por tanto no consume
-un solo token del presupuesto.
+modo `live` —mismos bloques, mismos tipos, mismo desglose— pero nada de aqui
+toca `src.retrieval` ni el gateway del evento, y por tanto no consume un solo
+token del presupuesto.
 
-Todo lo que produce va marcado: `mode="stub"`, textos con el prefijo `[stub]` y
-`metadata.estado="stub"`. `RETO.md` prohibe datos simulados en la version
-desplegada; estas marcas son lo que hace imposible confundirlos con reales.
+Escribe en `turnlog` y `usage` exactamente como lo harian los agentes reales,
+para que `src/api/chat.py` no necesite un camino especial: arma la respuesta
+leyendo el registro del turno, venga de donde venga.
 
-Determinista: la misma consulta produce siempre la misma respuesta.
+**Los tokens quedan en cero, no en cifras inventadas.** No hubo llamada al
+modelo; `num_interacciones` cuenta los agentes simulados porque esa es la
+trayectoria, pero declarar un consumo que no ocurrio seria falsear el Bloque B.
+
+Todo lo que produce va marcado: `mode="stub"`, `estado="stub"` y textos con el
+prefijo `[stub]`. `RETO.md` prohibe datos simulados en la version desplegada;
+estas marcas son lo que hace imposible confundirlos con reales.
 """
 
 from __future__ import annotations
@@ -19,15 +25,8 @@ import hashlib
 import re
 
 from src.agents.card import model_for
-from src.api.contracts import (
-    AgentResponse,
-    Citation,
-    Evaluacion,
-    Metadata,
-    TokensPorAgente,
-    ToolCall,
-    ViewSpec,
-)
+from src.api.contracts import ViewSpec
+from src.observability import turnlog, usage
 
 # Intencion de visualizacion. Lista deliberadamente corta: en modo stub solo
 # sirve para ejercitar las DOS ramas del contrato (con y sin `view_spec`).
@@ -77,7 +76,7 @@ def _fenomenos_mencionados(texto: str) -> list[str]:
     ]
 
 
-def _fragmentos(texto: str, k: int = 3) -> list[dict[str, str]]:
+def stub_fragments(texto: str, k: int = 3) -> list[dict[str, str]]:
     """Fragmentos con la misma forma que `Hit` en `src/retrieval/index.py`."""
     seed = _seed(texto)
     return [
@@ -94,95 +93,59 @@ def _fragmentos(texto: str, k: int = 3) -> list[dict[str, str]]:
     ]
 
 
-def _tokens(agente: str, texto: str, factor: int) -> TokensPorAgente:
-    """Cifras deterministas y plausibles. No son una estimacion de costo: en
-    modo stub NO hubo llamada al modelo, y el desglose existe solo para que el
-    consumidor del contrato vea el campo poblado."""
-    base = len(texto) + 40
-    entrada = base * factor
-    salida = max(16, base // 2)
-    return TokensPorAgente(
-        agente=agente,
-        modelo=model_for(agente),
-        input=entrada,
-        output=salida,
-        total=entrada + salida,
-    )
-
-
-def stub_response(texto: str, *, latencia_ms: int = 0) -> AgentResponse:
-    """Respuesta completa y bien formada, con datos simulados.
-
-    Args:
-        texto: consulta del usuario, ya saneada.
-        latencia_ms: medida por el endpoint de extremo a extremo.
-    """
-    fragmentos = _fragmentos(texto)
-    fenomenos = _fenomenos_mencionados(texto)
-    con_vista = _quiere_vista(texto)
-
-    agentes = ["orquestador", "agente_documental"]
-    tools: list[ToolCall] = [
-        ToolCall(
-            name="buscar_corpus",
-            input_parameters={"query": texto, "k": 3},
-            output=f"{len(fragmentos)} fragmentos simulados",
-        )
-    ]
-    desglose = [_tokens("orquestador", texto, 2), _tokens("agente_documental", texto, 6)]
-
-    view_spec: ViewSpec | None = None
-    if con_vista:
-        agentes.append("agente_visualizador")
-        view_spec = ViewSpec(
-            chart="bar",
-            fenomenos=fenomenos,  # type: ignore[arg-type]  # validado por Literal
-            group_by="organizacion",
-            titulo="[stub] Vista simulada",
-            nota="Datos simulados: esta vista no proviene del corpus.",
-        )
-        tools.append(
-            ToolCall(
-                name="emitir_view_spec",
-                input_parameters={"chart": "bar", "group_by": "organizacion"},
-                output=view_spec.model_dump_json(),
-            )
-        )
-        desglose.append(_tokens("agente_visualizador", texto, 3))
-
-    respuesta = (
+def stub_answer(texto: str) -> str:
+    """Texto de respuesta simulado, siempre marcado como tal."""
+    return (
         "[stub] Esta instancia corre en modo simulado: no hay corpus, indice ni "
         "modelo conectados, asi que la respuesta no contiene informacion real "
         f"sobre {texto[:120]!r}. La estructura del JSON si es la definitiva. "
         "Para respuestas reales, el servicio debe desplegarse con ARPIA_MODE=live."
     )
 
-    return AgentResponse(
-        respuesta=respuesta,
-        evaluacion=Evaluacion(
-            input=texto,
-            actual_output=respuesta,
-            retrieval_context=[f["text"] for f in fragmentos],
-            tools_called=tools,
-        ),
-        metadata=Metadata(
-            # Coherente con el desglose: un agente simulado = una llamada
-            # simulada. No hubo llamadas reales; `mode` y `estado` lo dicen.
-            num_interacciones=len(desglose),
-            agentes_invocados=agentes,
-            tokens_por_agente=desglose,
-            latencia_ms=latencia_ms,
-            estado="stub",
-        ),
-        mode="stub",
-        citations=[
-            Citation(
-                doc_id=f["doc_id"],
-                chunk_id=f["chunk_id"],
-                fuente=f["fuente"],
-                fragmento=f["text"][:240],
-            )
+
+def stub_turn(texto: str) -> tuple[str, ViewSpec | None, str]:
+    """Ejecuta un turno simulado completo.
+
+    Anota en `turnlog` y `usage` lo mismo que anotarian los agentes reales.
+
+    Returns:
+        `(respuesta, view_spec, estado)`.
+    """
+    fragmentos = stub_fragments(texto)
+    turnlog.add_context([f["text"] for f in fragmentos])
+    turnlog.add_citations(
+        [
+            {
+                "doc_id": f["doc_id"],
+                "chunk_id": f["chunk_id"],
+                "fuente": f["fuente"],
+                "fragmento": f["text"][:240],
+            }
             for f in fragmentos
-        ],
-        view_spec=view_spec,
+        ]
     )
+    turnlog.record_tool_call(
+        "buscar_corpus", {"query": texto, "k": 3}, f"{len(fragmentos)} fragmentos simulados"
+    )
+    usage.record_usage(None, agent="orquestador", model=model_for("orquestador"))
+    usage.record_usage(None, agent="agente_documental", model=model_for("agente_documental"))
+
+    view_spec: ViewSpec | None = None
+    if _quiere_vista(texto):
+        view_spec = ViewSpec(
+            chart="bar",
+            fenomenos=_fenomenos_mencionados(texto),  # type: ignore[arg-type]
+            group_by="organizacion",
+            titulo="[stub] Vista simulada",
+            nota="Datos simulados: esta vista no proviene del corpus.",
+        )
+        turnlog.record_tool_call(
+            "emitir_view_spec",
+            {"chart": "bar", "group_by": "organizacion"},
+            view_spec.model_dump_json(),
+        )
+        usage.record_usage(
+            None, agent="agente_visualizador", model=model_for("agente_visualizador")
+        )
+
+    return stub_answer(texto), view_spec, "stub"
