@@ -157,6 +157,7 @@ const DICC = {
         "tablero.tabla.documentos": "Documentos",
         "tablero.total": "Total",
         "tablero.sinDato": "(sin dato)",
+        "tablero.hallazgos": "Lo que dicen las cifras",
     },
 
     en: {
@@ -302,6 +303,7 @@ const DICC = {
         "tablero.tabla.documentos": "Documents",
         "tablero.total": "Total",
         "tablero.sinDato": "(no data)",
+        "tablero.hallazgos": "What the figures show",
     },
 };
 

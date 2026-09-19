@@ -129,6 +129,28 @@
       ]
     },
     {
+      "id": "agente_compositor",
+      "nombre": "Agente compositor",
+      "descripcion": "AGENTE ADICIONAL (puntos extra). CERO TOKENS. Lee la forma de los datos que cargó la vista que pidió el usuario y hace dos cosas: propone las vistas que esa primera hace evidentes —abrir por dentro un fenómeno que concentra la mitad del corpus, o mostrar la proporción cuando dos fuentes acumulan el 68 %— y redacta los hallazgos de la agregación. Es determinista y no llama a ningún modelo: las cifras salen de aritmética sobre metadata ya agregada, así que son exactas, gratuitas y no pueden alucinarse. Sus hallazgos son frecuencias y proporciones reales, nunca índices, puntajes ni pronósticos, que RETO.md prohíbe expresamente. Calla cuando los datos no justifican nada: una vista de apoyo que nadie pidió y que no añade un ángulo es ruido.",
+      "modelo": "",
+      "proveedor": "",
+      "activado_por": "orquestador",
+      "ejemplos_de_activacion": [
+        "Comparame el volumen documental de los tres fenomenos y muestrame una grafica",
+        "Grafica quien publica sobre seguridad del entorno espacial"
+      ],
+      "tools": [
+        {
+          "name": "componer_tablero",
+          "descripcion": "A partir del ViewSpec emitido y de sus filas agregadas, devuelve la vista principal mas hasta dos vistas complementarias del vocabulario cerrado, y los hallazgos de la agregacion con los doc_id que los sustentan.",
+          "input_parameters": {
+            "view_spec": "object",
+            "filas": "array"
+          }
+        }
+      ]
+    },
+    {
       "id": "verificador",
       "nombre": "Verificador de evidencia",
       "descripcion": "AGENTE ADICIONAL (puntos extra). Contrasta la respuesta redactada contra la evidencia que la sustenta antes de devolverla. La deteccion es determinista y no consume tokens: compara los identificadores de documento citados contra los recuperados en el turno. Solo cuando detecta una cita sin respaldo, o una respuesta extensa que no se apoya en ninguna fuente, gasta una llamada para corregirla; si no puede, degrada a una declaracion explicita de falta de evidencia en vez de devolver una afirmacion infundada.",

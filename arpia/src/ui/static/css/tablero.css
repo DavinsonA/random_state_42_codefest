@@ -760,3 +760,38 @@
 .ampliado-cuerpo .kpi-cifra {
     font-size: 96px;
 }
+
+
+/* -- hallazgos del compositor ----------------------------------------------
+ *
+ * Lo que las cifras de la vista dicen, calculado sin modelo. Se separan
+ * visualmente de la respuesta del agente a proposito: una es lo que afirma el
+ * corpus y otra es aritmetica sobre la agregacion, y mezclarlas haria que el
+ * analista no supiera cual esta leyendo.
+ *
+ * Sin colores propios: solo tokens existentes.
+ */
+
+.pagina-tablero .hallazgos-titulo {
+    margin: 12px 0 4px;
+    color: var(--arpia-text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.pagina-tablero .hallazgos {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0 0 0 16px;
+    list-style: disc;
+}
+
+.pagina-tablero .hallazgos li {
+    color: var(--arpia-text);
+    font-size: 13px;
+    line-height: 1.5;
+}

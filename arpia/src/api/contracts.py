@@ -251,6 +251,21 @@ class AgentResponse(BaseModel):
     mode: Mode = Field("stub", description='"live" en despliegue real; "stub" son datos simulados.')
     citations: list[Citation] = Field(default_factory=list)
     view_spec: ViewSpec | None = Field(None, description="Presente solo si el turno pide vista.")
+    view_specs: list[ViewSpec] = Field(
+        default_factory=list,
+        description=(
+            "La vista pedida y las que la explican. La primera es SIEMPRE `view_spec`, "
+            "que se mantiene por separado para no romper a ningun cliente que ya lo lea."
+        ),
+    )
+    hallazgos: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Lo que las cifras de la vista dicen, calculado sin modelo: frecuencias y "
+            "proporciones reales. Nunca indices, scores ni pronosticos (RETO.md "
+            "§Restricciones duras)."
+        ),
+    )
     trace_id: str = Field(
         "",
         description=(

@@ -111,6 +111,8 @@ def _build(
     *,
     agentes_extra: tuple[str, ...] = (),
     view_spec: ViewSpec | None = None,
+    view_specs: list[ViewSpec] | None = None,
+    hallazgos: list[str] | None = None,
 ) -> AgentResponse:
     """Arma el JSON de ADL con lo que el turno realmente registro.
 
@@ -153,6 +155,8 @@ def _build(
         mode=get_settings().arpia_mode,  # type: ignore[arg-type]
         citations=[Citation(**c) for c in turnlog.citations()],
         view_spec=view_spec,
+        view_specs=view_specs or ([view_spec] if view_spec else []),
+        hallazgos=hallazgos or [],
         trace_id=tracing.current_trace_id() or "",
     )
 
@@ -171,6 +175,42 @@ def _leer_view_spec(crudo: Any) -> ViewSpec | None:
     except ValidationError as exc:
         log.warning("el grafo emitio un view_spec invalido, se descarta: %s", exc.errors()[:2])
         return None
+
+
+def _componer_tablero(vista: ViewSpec | None) -> tuple[list[ViewSpec], list[str]]:
+    """Vistas de apoyo y hallazgos de la vista que emitio el agente. CERO tokens.
+
+    Es el agente compositor, y vive en el lado API a proposito: necesita los
+    datos YA agregados de la vista —que el grafo no carga, porque decidir una
+    vista y poblarla son cosas distintas— y esos salen de `dashboard.py`, que
+    es quien sabe traducir un `ViewSpec` a filas.
+
+    **Nunca lanza.** Un fallo al proponer una vista de apoyo no puede tumbar la
+    respuesta que el usuario esta esperando: se devuelve la vista principal sola
+    y el turno sigue. El apoyo es apoyo.
+    """
+    if vista is None:
+        return [], []
+    try:
+        from src.agents import compositor, hallazgos
+        from src.api.dashboard import dimension_efectiva, filas_de_vista
+
+        crudas = filas_de_vista(vista)
+        filas = [
+            hallazgos.Fila(
+                clave=str(f.get("clave", "")),
+                valor=int(f.get("valor") or 0),
+                doc_ids=[str(d) for d in (f.get("doc_ids") or [])],
+            )
+            for f in crudas
+        ]
+        vistas = compositor.componer(vista, filas)
+        textos = [h.texto for h in hallazgos.describir(filas, dimension_efectiva(vista))]
+        turnlog.record_agent(compositor.AGENTE)
+        return vistas, textos
+    except Exception as exc:  # noqa: BLE001 - frontera: el apoyo nunca tumba el turno
+        log.warning("el compositor fallo (%s); se devuelve solo la vista principal", exc)
+        return [vista], []
 
 
 def _retrieval_fallback(texto: str) -> str:
@@ -288,7 +328,16 @@ def _turno(texto: str, session_id: str) -> AgentResponse:
             agentes_extra=(guardian.AGENTE,),
         )
 
-    construida = _build(texto, respuesta, estado, start, view_spec=view_spec)
+    vistas, hallazgos_texto = _componer_tablero(view_spec)
+    construida = _build(
+        texto,
+        respuesta,
+        estado,
+        start,
+        view_spec=view_spec,
+        view_specs=vistas,
+        hallazgos=hallazgos_texto,
+    )
 
     # 5. Memoria: se guarda lo que costo producir. No se cachea un error ni un
     #    rechazo: repetirlos sale gratis y cachearlos congelaria un fallo

@@ -142,6 +142,46 @@ def timeline(
         return _error(f"linea de tiempo no disponible: {type(exc).__name__}")
 
 
+def dimension_efectiva(vista: Any) -> str:
+    """Por que dimension agrupa realmente una vista.
+
+    Una vista temporal agrupa por año aunque el agente no lo diga: es la unica
+    granularidad que el corpus sostiene y evita una serie de una sola barra.
+
+    Vive aqui, en una sola funcion, porque el criterio lo usan dos caminos
+    —`POST /api/view` y el compositor del turno— y dos copias del mismo criterio
+    divergen a la primera que alguien toque una.
+    """
+    return vista.group_by or ("anio" if vista.chart == "timeline" else "fenomeno")
+
+
+def filas_de_vista(vista: Any) -> list[dict[str, Any]]:
+    """Resuelve un `ViewSpec` a sus filas agregadas. CERO tokens.
+
+    Nunca lanza: sin indice o con una agregacion imposible devuelve una lista
+    vacia, y quien llame decide que hacer. Es deliberado —lo usa el compositor
+    en pleno turno, y un fallo al proponer una vista de apoyo no puede tumbar
+    la respuesta que el usuario esta esperando.
+    """
+    from src.retrieval import aggregates
+
+    if not aggregates.disponible():
+        return []
+    try:
+        datos = aggregates.agregar(
+            metrica=vista.metrica,
+            group_by=dimension_efectiva(vista),  # type: ignore[arg-type]
+            fenomenos=list(vista.fenomenos) or None,
+            desde=int(vista.desde) if vista.desde else None,
+            hasta=int(vista.hasta) if vista.hasta else None,
+            limite=100,
+        )
+    except Exception as exc:  # noqa: BLE001 - frontera: nunca tumba el turno
+        log.warning("no se pudieron resolver las filas de la vista: %s", exc)
+        return []
+    return list(datos.get("filas") or [])
+
+
 @router.post("/view")
 def view(spec: dict[str, Any]) -> JSONResponse:
     """Resuelve un `ViewSpec` a los datos que el tablero debe pintar.
@@ -180,9 +220,7 @@ def view(spec: dict[str, Any]) -> JSONResponse:
     if not aggregates.disponible():
         return _error("el corpus aun no esta cargado en este despliegue")
 
-    # Una vista temporal agrupa por ano aunque el agente no lo diga: es la unica
-    # granularidad que el corpus sostiene y evita una serie de una sola barra.
-    group_by = vista.group_by or ("anio" if vista.chart == "timeline" else "fenomeno")
+    group_by = dimension_efectiva(vista)
 
     try:
         datos = aggregates.agregar(

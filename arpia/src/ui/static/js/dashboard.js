@@ -578,6 +578,19 @@ function mostrarRespuesta(datos) {
     meta.append(el("span", "mono", `${fmt.format(md.tokens?.total || 0)} tokens · ${fmt.format(md.latencia_ms || 0)} ms`));
     caja.append(meta);
 
+    // Hallazgos del compositor: lo que las cifras de la vista dicen, calculado
+    // sin modelo. Van debajo de la respuesta y antes de la procedencia porque
+    // son lectura de los datos, no una afirmacion del corpus: el analista debe
+    // poder distinguir de un vistazo lo que dice un documento de lo que dice la
+    // aritmetica sobre la agregacion.
+    if (Array.isArray(datos.hallazgos) && datos.hallazgos.length) {
+        const lista = el("ul", "hallazgos");
+        lista.setAttribute("aria-label", t("tablero.hallazgos"));
+        for (const h of datos.hallazgos) lista.append(el("li", null, h));
+        caja.append(el("p", "hallazgos-titulo", t("tablero.hallazgos")));
+        caja.append(lista);
+    }
+
     // Las citas del texto se vuelven interactivas: al pulsarlas abren el
     // fragmento exacto que las sostiene. Es la trazabilidad que exige RETO.md
     // —todo dato mostrado se rastrea hasta su doc_id y chunk_id— puesta al
