@@ -177,6 +177,31 @@ def _leer_view_spec(crudo: Any) -> ViewSpec | None:
         return None
 
 
+def _vista_de_respaldo(texto: str, estado: str) -> ViewSpec | None:
+    """La vista que el usuario pidio cuando el visualizador no dejo una valida. CERO tokens.
+
+    Vive en el lado API por la misma razon que `_componer_tablero`: lee la traza
+    del turno (`turnlog`), que es lo unico que sabe que se contó y que agente
+    intervino. **Nunca lanza**: un respaldo que falla deja el turno como estaba.
+    """
+    if estado != "ok":
+        return None
+    try:
+        from src.agents import vista_respaldo
+
+        vista = vista_respaldo.desde_turno(texto, turnlog.agentes(), turnlog.tool_calls())
+    except Exception as exc:  # noqa: BLE001 - frontera: el respaldo nunca tumba el turno
+        log.warning("la vista de respaldo fallo (%s); el turno sigue sin vista", exc)
+        return None
+    if vista is not None:
+        log.info(
+            "el visualizador no dejo una vista valida; se usa la de respaldo (%s por %s)",
+            vista.chart,
+            vista.group_by,
+        )
+    return vista
+
+
 def _componer_tablero(vista: ViewSpec | None) -> tuple[list[ViewSpec], list[str]]:
     """Vistas de apoyo y hallazgos de la vista que emitio el agente. CERO tokens.
 
@@ -327,6 +352,9 @@ def _turno(texto: str, session_id: str) -> AgentResponse:
             start,
             agentes_extra=(guardian.AGENTE,),
         )
+
+    if view_spec is None and not s.is_stub:
+        view_spec = _vista_de_respaldo(texto, estado)
 
     vistas, hallazgos_texto = _componer_tablero(view_spec)
     construida = _build(

@@ -287,6 +287,55 @@ def test_un_turno_degradado_no_se_cachea(live):
     assert segunda["metadata"]["num_interacciones"] == 2, "no es una respuesta del cache"
 
 
+# -- vista de respaldo -------------------------------------------------------
+
+
+class GrafoQueSeQuedaSinVista(FakeGraph):
+    """Deja el estado del fallo real: el visualizador intervino, el analitico conto
+    (`consultar_agregado`) y NO hubo `view_spec` valido."""
+
+    def invoke(self, state, config=None):
+        from src.observability import turnlog
+
+        turnlog.record_agent("agente_analitico")
+        turnlog.record_tool_call(
+            "consultar_agregado",
+            {"metrica": "conteo_documentos", "group_by": "organizacion", "fenomenos": "F3"},
+            "{}",
+        )
+        turnlog.record_agent("agente_visualizador")  # la llamada que devolvio texto y no valido
+        return super().invoke(state, config)
+
+
+def test_si_el_visualizador_no_deja_vista_se_reconstruye_la_pedida(live):
+    client, _ = live(GrafoQueSeQuedaSinVista())
+    body = _chat(client, "Muéstrame en una dona la participación de cada organización").json()
+    assert body["view_spec"]["chart"] == "donut"
+    assert body["view_spec"]["group_by"] == "organizacion"
+    assert body["view_spec"]["fenomenos"] == ["F3"]
+    assert body["view_specs"][0] == body["view_spec"], "la principal va siempre primera"
+    assert body["metadata"]["estado"] == "ok"
+
+
+def test_sin_el_visualizador_una_pregunta_de_texto_no_gana_una_vista(live):
+    client, _ = live(FakeGraph())  # ni visualizador ni conteo
+    body = _chat(client, "que reporta el corpus sobre satelites").json()
+    assert body["view_spec"] is None and body["view_specs"] == []
+
+
+def test_un_fallo_del_respaldo_no_tumba_la_respuesta(live, monkeypatch):
+    from src.agents import vista_respaldo
+
+    def explota(*_a, **_k):
+        raise RuntimeError("bug en el respaldo")
+
+    monkeypatch.setattr(vista_respaldo, "desde_turno", explota)
+    client, _ = live(GrafoQueSeQuedaSinVista())
+    resp = _chat(client, "Grafica por organización")
+    assert resp.status_code == 200
+    assert resp.json()["view_spec"] is None and resp.json()["metadata"]["estado"] == "ok"
+
+
 # -- agentes_invocados incluye a los que no gastan tokens -------------------
 
 
