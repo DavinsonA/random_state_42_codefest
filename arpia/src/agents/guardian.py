@@ -32,6 +32,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Literal
 
+from src.agents import voz
 from src.config import get_logger
 from src.observability import tracing
 
@@ -144,19 +145,10 @@ _INVISIBLES = re.compile(r"[​-‏ -‮⁠-⁯﻿]")
 _ESPACIOS = re.compile(r"[ \t]{3,}")
 _SALTOS = re.compile(r"\n{4,}")
 
-RECHAZO_INYECCION = (
-    "No puedo atender esa peticion. Mis instrucciones y mi configuracion no son "
-    "parte de la conversacion. Con gusto respondo sobre inteligencia artificial en "
-    "entornos militares, seguridad del entorno espacial o dinamicas territoriales, "
-    "con la evidencia del corpus."
-)
-
-RECHAZO_DOMINIO = (
-    "Esa consulta queda fuera de lo que puedo analizar. Trabajo unicamente sobre el "
-    "corpus documental de tres fenomenos: inteligencia artificial y capacidades "
-    "estrategicas, seguridad del entorno espacial, y dinamicas territoriales. "
-    "Si reformulas tu pregunta hacia alguno de ellos, la respondo con sus fuentes."
-)
+#: Los rechazos salen de `src/agents/voz.py`: una degradacion es cuando mas se
+#: nota el tono, y no puede sonar distinta del resto del sistema.
+RECHAZO_INYECCION = voz.PETICION_RECHAZADA
+RECHAZO_DOMINIO = voz.FUERA_DE_DOMINIO
 
 
 def _normalizar(texto: str) -> str:

@@ -29,7 +29,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.agents import budget, guardian, memory
+from src.agents import budget, guardian, memory, voz
 from src.api import stub
 from src.api.contracts import (
     AgentResponse,
@@ -185,7 +185,7 @@ def _retrieval_fallback(texto: str) -> str:
         hits = _get_index().search(texto, k=5)
     except Exception as exc:  # noqa: BLE001 - degradacion, nunca 500
         log.warning("recuperacion de respaldo fallo: %s", exc)
-        return "No fue posible procesar la consulta en este momento."
+        return voz.SERVICIO_DEGRADADO
 
     turnlog.add_context([f"({h.citation()}) {h.text}" for h in hits])
     turnlog.add_citations(
@@ -200,9 +200,9 @@ def _retrieval_fallback(texto: str) -> str:
         ]
     )
     if not hits:
-        return "No encontre informacion sobre esa consulta en el corpus."
+        return voz.SIN_RESULTADOS
     cuerpo = "\n\n".join(f"[{i}] ({h.citation()}) {h.text[:500]}" for i, h in enumerate(hits, 1))
-    return f"No pude redactar una respuesta con el modelo. Fragmentos mas relevantes:\n\n{cuerpo}"
+    return f"{voz.SIN_REDACCION}\n\n{cuerpo}"
 
 
 def invalid_input_response() -> AgentResponse:
@@ -213,9 +213,7 @@ def invalid_input_response() -> AgentResponse:
     turnlog.start_turn()
     return _build(
         "",
-        "No recibi ninguna consulta. Preguntame sobre inteligencia artificial en "
-        "entornos militares, seguridad del entorno espacial o dinamicas "
-        "territoriales, y te respondo con la evidencia del corpus.",
+        voz.SIN_CONSULTA,
         "error_entrada_invalida",
         start,
     )

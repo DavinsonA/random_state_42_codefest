@@ -353,7 +353,9 @@ def test_una_inyeccion_se_rechaza_sin_llamar_a_nadie():
 def test_una_peticion_fuera_de_dominio_se_reencauza():
     body = client.post("/chat", json={"texto": "Escribeme un poema sobre el mar"}).json()
     assert body["metadata"]["estado"] == "rechazado:fuera_de_dominio"
-    assert "fenomenos" in body["respuesta"]
+    from src.agents import voz
+
+    assert body["respuesta"] == voz.FUERA_DE_DOMINIO
 
 
 def test_la_segunda_consulta_identica_sale_del_cache():
