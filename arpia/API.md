@@ -250,7 +250,15 @@ no se puede emitir.
 | `fenomenos` | subconjunto de `F1`, `F2`, `F3` (vacío = los tres) |
 | `group_by` | `fenomeno`, `organizacion`, `fuente`, `formato`, `anio` |
 | `desde` / `hasta` | año `YYYY` inclusive |
+| `serie_por` | como `group_by`; segunda dimensión que separa las series (solo `bar`, `stacked_bar`, `timeline`). **No está en el esquema que ve el modelo** (ver abajo) |
 | `titulo`, `nota` | texto; `nota` es la advertencia que el tablero **debe** mostrar |
+
+**`serie_por` existe pero el visualizador no lo ve.** Sirve al tablero (`POST /api/view`, enlaces `#vista=`)
+y al compositor. Se oculta del esquema JSON del modelo (`SkipJsonSchema`) porque, medido con `gpt-oss-20b`,
+con el campo visible la misma dona de F3 salía con **F1** en 4 de 4 corridas: un dato mal filtrado, peor que un
+cruce que falta. Un `serie_por` inválido (igual al eje, o en un gráfico que no separa series) se **quita** en
+lugar de invalidar la vista; fuera del vocabulario sigue siendo un error. Exponerlo al modelo se decide
+midiendo (hay una prueba que fija el esquema).
 
 **El vocabulario está podado a propósito.** El índice trae ocho campos (`doc_id`,
 `chunk_id`, `fuente`, `formato`, `fenomeno`, `posicion`, `num_tokens`, `texto`) y **ni

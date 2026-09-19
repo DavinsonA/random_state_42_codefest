@@ -180,3 +180,58 @@ def test_los_topes_se_declaran_en_vez_de_recortar_en_silencio(monkeypatch):
     r = _view(chart="bar", group_by="organizacion")
     assert len(r["categorias"]) == aggregates.MAX_CATEGORIAS
     assert r["categorias_omitidas"] == 5
+
+
+# -- serie_por: una segunda dimension ------------------------------------------
+
+
+def test_serie_por_cruza_dos_dimensiones():
+    r = _view(chart="stacked_bar", group_by="organizacion", serie_por="formato", fenomenos=["F3"])
+    assert r["serie_por"] == "formato"
+    assert {s["clave"] for s in r["series"]} == {"pdf", "html"}
+    por_cat = {c: sum(s["valores"][i] for s in r["series"]) for i, c in enumerate(r["categorias"])}
+    assert por_cat == {f["clave"]: f["valor"] for f in r["filas"]}, "el cruce no cambia los totales"
+
+
+def test_serie_por_ordena_las_series_por_total_y_las_de_fenomeno_por_clave():
+    r = _view(chart="stacked_bar", group_by="fenomeno", serie_por="organizacion")
+    totales = [sum(s["valores"]) for s in r["series"]]
+    assert totales == sorted(totales, reverse=True)
+    assert r["categorias"] == ["F3", "F1", "F2"]
+
+
+def test_una_serie_por_repetida_se_quita_y_la_vista_sigue_valida():
+    """Descartar la vista entera por un campo de mas deja al usuario sin grafico."""
+    r = _view(chart="stacked_bar", group_by="organizacion", serie_por="organizacion")
+    assert r["disponible"] and r["serie_por"] == "fenomeno", "vuelve al comportamiento por defecto"
+
+
+@pytest.mark.parametrize("chart", ["donut", "kpi", "table"])
+def test_los_graficos_que_no_separan_series_ignoran_serie_por(chart):
+    from src.api.contracts import ViewSpec
+
+    v = ViewSpec(chart=chart, group_by="organizacion", serie_por="formato")
+    assert v.serie_por is None
+
+
+def test_un_timeline_con_serie_por_anio_se_corrige_porque_el_eje_ya_es_el_anio():
+    from src.api.contracts import ViewSpec
+
+    assert ViewSpec(chart="timeline", serie_por="anio").serie_por is None
+    assert ViewSpec(chart="timeline", serie_por="organizacion").serie_por == "organizacion"
+
+
+def test_serie_por_fuera_del_vocabulario_sigue_siendo_un_error():
+    """El esquema cerrado no se relaja: solo se corrige lo que se entiende."""
+    r = _view(chart="bar", group_by="organizacion", serie_por="lugar")
+    assert r["disponible"] is False
+
+
+def test_serie_por_no_esta_en_el_esquema_que_ve_el_visualizador():
+    """Medido con el modelo real: visible, la dona de F3 salia con F1 (4 de 4).
+
+    Si alguien lo expone, que sea una decision tomada midiendo, no un descuido.
+    """
+    from src.api.contracts import ViewSpec
+
+    assert "serie_por" not in ViewSpec.model_json_schema()["properties"]

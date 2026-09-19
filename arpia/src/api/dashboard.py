@@ -199,10 +199,12 @@ def filas_de_vista(vista: Any) -> list[dict[str, Any]]:
 def serie_efectiva(vista: Any, group_by: str) -> str | None:
     """Que dimension separa las series de una vista.
 
-    Sin `serie_por` explicito, una vista agrupada por otra cosa que el fenomeno
-    trae una serie por fenomeno: es lo que los graficos apilan y colorean, y
-    hasta ahora lo armaba la GUI con una peticion por fenomeno.
+    Con `serie_por` explicito, esa. Sin el, una vista agrupada por otra cosa que
+    el fenomeno trae una serie por fenomeno: es lo que los graficos apilan y
+    colorean, y hasta ahora lo armaba la GUI con una peticion por fenomeno.
     """
+    if getattr(vista, "serie_por", None):
+        return vista.serie_por
     return "fenomeno" if group_by != "fenomeno" else None
 
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 # -- vocabulario cerrado ---------------------------------------------------
 # Los `Literal` son la frontera de seguridad del agente visualizador: lo que no
@@ -41,6 +42,9 @@ ChartType = Literal["timeline", "bar", "stacked_bar", "donut", "table", "kpi"]
 # `organizacion` y `anio` son DERIVADAS, no inventadas (ver src/retrieval/enrich.py):
 #   organizacion -> segundo nivel de la ruta `fuente` (CSIS_Aerospace, CSET_Georgetown...)
 #   anio         -> ano en el nombre de archivo; cubre 622 de 1.826 documentos (34%)
+#: Graficos que pueden separar sus series por una segunda dimension.
+SERIE_POR_CHARTS = ("bar", "stacked_bar", "timeline")
+
 GroupBy = Literal["fenomeno", "organizacion", "fuente", "formato", "anio"]
 
 # Solo conteos y frecuencias. `RETO.md` prohibe presentar como medicion
@@ -238,6 +242,28 @@ class ViewSpec(BaseModel):
             "identificable, y ocultarlo convierte un conteo honesto en una cifra enganosa."
         ),
     )
+
+    # Oculta del esquema que ve el visualizador (`SkipJsonSchema`) a proposito.
+    # Medido con gpt-oss-20b: con el campo visible, la misma pregunta de dona de
+    # F3 pasaba de F3 a F1 en 4 de 4 corridas (con o sin usarlo), es decir, un
+    # dato mal filtrado. Se valida y funciona en el API, el tablero y el
+    # compositor; darselo al modelo es una decision que se toma midiendo.
+    serie_por: SkipJsonSchema[GroupBy | None] = None
+
+    @model_validator(mode="after")
+    def _serie_por_coherente(self) -> ViewSpec:
+        """Una segunda dimension que no se puede pintar se quita, no invalida la vista.
+
+        Medido con el modelo real: una vista degradada (sin cruce) es util; una
+        vista descartada por un campo de mas deja al usuario sin grafico. El
+        cruce solo tiene sentido si es distinto del eje y el componente lo usa.
+        """
+        eje = self.group_by or ("anio" if self.chart == "timeline" else None)
+        if self.serie_por is not None and (
+            self.serie_por == eje or self.chart not in SERIE_POR_CHARTS
+        ):
+            self.serie_por = None
+        return self
 
 
 class HallazgoDetalle(BaseModel):
