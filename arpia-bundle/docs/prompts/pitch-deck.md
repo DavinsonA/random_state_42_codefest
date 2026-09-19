@@ -1,8 +1,14 @@
 # Meta-prompt — Pitch deck de A.R.P.I.A.
 
 > Para Claude Design, Gamma, Canva u otra herramienta de generación de slides.
-> Rellena los `<<campos>>` **después** de conocer el reto. Un deck genérico
-> con los huecos sin llenar se nota de inmediato.
+>
+> **Los campos ya están rellenos con valores medidos** el 19/09/2026 contra el
+> sistema desplegado y el corpus real. La fuente de cada cifra, y las que no
+> caben en el deck, están en [`../pitch-recontexto.md`](../pitch-recontexto.md).
+>
+> Si una cifra cambia, se cambia **primero en el recontexto** y luego aquí: dos
+> copias que divergen son peores que una sola desactualizada, porque nadie sabe
+> cuál mirar.
 
 ---
 
@@ -13,10 +19,45 @@ Genera una presentación de 8 diapositivas para un pitch técnico de 5 minutos
 ante un jurado de fuerza aérea, academia e industria.
 
 PROYECTO
-Nombre: A.R.P.I.A.
-Qué es: <<una frase: qué hace el sistema y para quién>>
-Problema que resuelve: <<el dolor concreto, en términos del usuario, no
-técnicos>>
+Nombre: A.R.P.I.A. (Asistente de Recuperación y Producción de Inteligencia
+Analítica)
+
+Qué es: un sistema multi-agente que responde preguntas en lenguaje natural
+sobre un corpus de 326.866 fragmentos documentales y construye el tablero que
+cada respuesta necesita, con cada cifra rastreable hasta el documento que la
+sostiene.
+
+Problema que resuelve: un analista con 1.826 documentos de 20 organizaciones no
+tiene un problema de búsqueda, tiene un problema de PROCEDENCIA. Encontrar una
+cifra le cuesta minutos; justificar de dónde salió, ante quien decide, le cuesta
+horas. Y cuando la base documental está sesgada —el 68 % del material sobre IA
+estratégica viene de dos centros estadounidenses— ese sesgo viaja dentro de la
+conclusión sin que nadie lo vea.
+
+CIFRAS VERIFICADAS (usar estas, no redondear ni estimar)
+- Corpus: 326.866 fragmentos · 1.826 documentos · 20 organizaciones · 3 fenómenos
+- Ocho agentes, CUATRO de ellos a coste cero de tokens
+- Coste por pregunta: 1 a 3 llamadas. Medido: 2.662 tokens y 11,9 s para una
+  pregunta que generó 4 visualizaciones, 2 hallazgos y 8 citas
+- Seguridad: 28 vectores de inyección probados. 21 bloqueados sin gastar una
+  sola llamada, 4 neutralizados dentro del documento, 0 fugas, 0 falsos
+  positivos sobre 14 consultas legítimas
+- 541 pruebas Python y 35 de JavaScript, todas en verde
+- Cobertura temporal del corpus: 621 de 1.826 documentos declaran año (34 %)
+
+DIAPOSITIVA 6 — decisiones, incluida una descartada con datos
+Usar estas dos, que son las más fuertes:
+1. Se descartó dar al modelo el campo `serie_por`: con él visible, el modelo
+   cambiaba el fenómeno filtrado de F3 a F1 en 4 de 4 corridas. Lo rellena
+   ahora un agente determinista, que no se equivoca de fenómeno.
+2. Se descartó el mapa geográfico. El corpus no trae ubicación, y geocodificar
+   topónimos habría dado un mapa denso, convincente y sin respaldo trazable.
+   Es el descarte más doloroso —F3 son dinámicas territoriales— y el más
+   defendible.
+
+DIAPOSITIVA 7 — límites, dichos antes de que los pregunten
+El 66 % de los documentos no declara año · no hay geografía · no hay grafo de
+relaciones · un solo worker (3,8 GB medidos con 4 peticiones concurrentes).
 
 SISTEMA VISUAL (obligatorio, no improvisar colores)
 Fondo principal:      #040C1D
