@@ -19,6 +19,7 @@ Funciones puras, sin estado, sin E/S y sin tokens.
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any
 
 #: Un ano plausible para este corpus. Se descartan cifras como 1024 o 4096, que
@@ -72,9 +73,19 @@ def anio(fuente: str) -> int | None:
 
     None significa "no identificado", NUNCA "sin fecha": el documento puede
     tener fecha y no estar en su nombre de archivo.
+
+    Se descartan los anos futuros. El corpus real tenia un documento fechado en
+    2030: no es su fecha de publicacion, es un titulo tipo "Agenda 2030". Un
+    punto en el futuro dentro de una linea de tiempo se lee como un dato, y es
+    un artefacto del nombre del archivo.
     """
-    m = _ANIO.search(fuente or "")
-    return int(m.group(1)) if m else None
+    texto = fuente or ""
+    limite = date.today().year
+    for m in _ANIO.finditer(texto):
+        valor = int(m.group(1))
+        if valor <= limite:
+            return valor
+    return None
 
 
 def enrich(row: dict[str, Any]) -> dict[str, Any]:

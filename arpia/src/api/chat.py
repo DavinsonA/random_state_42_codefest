@@ -151,6 +151,22 @@ def _build(
     )
 
 
+def _leer_view_spec(crudo: Any) -> ViewSpec | None:
+    """Valida la vista que emitio el grafo. Una vista invalida no se devuelve.
+
+    El esquema cerrado de `ViewSpec` es una frontera de seguridad, no una
+    formalidad: si el visualizador produce algo fuera del vocabulario, se
+    descarta aqui y la respuesta de texto sigue siendo util.
+    """
+    if not crudo:
+        return None
+    try:
+        return ViewSpec.model_validate(crudo)
+    except ValidationError as exc:
+        log.warning("el grafo emitio un view_spec invalido, se descarta: %s", exc.errors()[:2])
+        return None
+
+
 def _retrieval_fallback(texto: str) -> str:
     """Sin modelo, lo honesto y util es entregar los fragmentos relevantes.
 
@@ -242,6 +258,7 @@ def run_chat(texto: str, session_id: str) -> AgentResponse:
                 config = {"configurable": {"thread_id": session_id}}
                 result = _get_graph().invoke({"question": texto}, config=config)
                 respuesta = result.get("answer") or ""
+                view_spec = _leer_view_spec(result.get("view_spec"))
                 if not respuesta:
                     estado = "error_respuesta_vacia"
             except Exception:

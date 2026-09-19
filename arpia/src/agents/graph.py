@@ -1,129 +1,260 @@
-"""Grafo agentico base de A.R.P.I.A.
+"""Grafo agentico de A.R.P.I.A.: plan unico, delegacion y una replanificacion.
 
-Arquitectura deliberadamente minima: un bucle razonar -> herramienta ->
-observar, con un nodo de redaccion SEPARADO y sin herramientas. Separar la
-redaccion del bucle de busqueda mejora notablemente la calidad del texto final.
+    START -> begin -> planificar -> ejecutar -> (replanificar una vez) -> componer -> END
 
-Este grafo es una plantilla. El dia del evento se adapta segun la linea de
-trabajo elegida (`docs/architecture.md`), no se reescribe desde cero.
+**Por que esto y no ReAct.** El bucle razonar-herramienta-observar hace un numero
+impredecible de llamadas al modelo por pregunta. El Bloque B de `RETO.md`
+normaliza la eficiencia contra los otros equipos y mide tokens, interacciones y
+latencia: un coste que no se puede acotar es un riesgo que no se puede
+presupuestar.
+
+Coste del turno, acotado por construccion:
+
+    pregunta documental              2 llamadas  (plan + redaccion)
+    pregunta cuantitativa            1 llamada   (plan; el analitico no gasta)
+    pregunta con vista               3 llamadas  (plan + redaccion + view_spec)
+    sin evidencia en la 1a pasada   +1 llamada   (una replanificacion, y solo una)
+
+La recuperacion y la agregacion son locales y no cuestan tokens. La
+consolidacion final tampoco: cada ejecutor ya redacto lo suyo.
+
+La recuperacion no cuesta tokens: FAISS y el encoder corren en la CPU del
+contenedor. Esa asimetria es la ventaja competitiva del sistema.
 """
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langgraph.graph import END, START, StateGraph
-from langgraph.prebuilt import ToolNode
 
-from src.agents.state import AgentState
-from src.config import get_logger, get_settings
-from src.observability import tracing, usage
-from src.tools.registry import registry
+from src.agents import executors, orchestrator
+from src.agents.memory import VENTANA_TURNOS
+from src.agents.plan import MAX_REPLANES, Paso, Plan
+from src.agents.state import TURNO_LIMPIO, AgentState
+from src.config import get_logger
 
 log = get_logger(__name__)
 
-SYSTEM_PROMPT = """Eres un analista de fuentes abiertas.
-
-Reglas:
-- Busca evidencia antes de afirmar cualquier hecho.
-- Cita siempre el identificador del documento del que proviene cada afirmacion.
-- Si tras varias busquedas no encuentras evidencia, dilo explicitamente.
-  No inventes, no completes con conocimiento general.
-- No repitas una consulta que ya lanzaste.
-"""
+# -- nodos ------------------------------------------------------------------
 
 
-def _llm():
-    """Cliente del gateway de modelos del evento (OpenAI-compatible)."""
-    from langchain_openai import ChatOpenAI
+def begin(state: AgentState) -> dict[str, Any]:
+    """Abre el turno: agrega la pregunta y limpia lo que no debe sobrevivir.
 
-    s = get_settings()
-    if not s.llm_configured:
-        raise RuntimeError("LLM_BASE_URL y LLM_API_KEY no configurados. Copia .env.example a .env.")
-    return ChatOpenAI(
-        base_url=s.llm_base_url,
-        api_key=s.llm_api_key,
-        model=s.llm_model,
-        timeout=s.request_timeout_s,
-        temperature=0,
-    )
+    Tres cosas, y las tres arreglan un fallo real (ver `state.py`):
 
-
-def _invoke_llm(model: Any, messages: list, span_name: str) -> AIMessage:
-    """Invoca el LLM dentro de un span `llm`, y registra el consumo de tokens
-    que devuelva el gateway (si lo devuelve)."""
-    last_input = messages[-1].content if messages else ""
-    with tracing.span("llm", span_name, input=str(last_input)[:2000]) as sp:
-        response = model.invoke(messages)
-        usage.record_usage(getattr(response, "usage_metadata", None))
-        sp.set_output(str(getattr(response, "content", ""))[:2000])
-        return response
-
-
-# -- nodos ---------------------------------------------------------------
-
-
-def reason(state: AgentState) -> dict:
-    """Decide si hace falta otra herramienta o si ya hay evidencia suficiente."""
-    messages = state.get("messages") or [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=state["question"]),
-    ]
-    model = _llm().bind_tools(registry.all())
-    response = _invoke_llm(model, messages, "reason")
-    return {"messages": [response], "turns": 1}
-
-
-def compose(state: AgentState) -> dict:
-    """Redacta la respuesta final. Nodo SIN herramientas, a proposito."""
-    evidencia = "\n\n".join(
-        m.content for m in state.get("messages", []) if getattr(m, "type", "") == "tool"
-    )
-    prompt = [
-        SystemMessage(
-            content=(
-                "Redacta la respuesta final usando SOLO la evidencia recuperada. "
-                "Cita el identificador de documento de cada afirmacion. Si la "
-                "evidencia es insuficiente, dilo de forma explicita."
-            )
-        ),
-        HumanMessage(content=f"Pregunta: {state['question']}\n\nEvidencia:\n{evidencia}"),
-    ]
-    answer = _invoke_llm(_llm(), prompt, "compose")
-    return {"answer": answer.content, "messages": [AIMessage(content=answer.content)]}
-
-
-# -- aristas -------------------------------------------------------------
-
-
-def route(state: AgentState) -> Literal["tools", "compose"]:
-    """Decide el siguiente paso. Aqui vive el diseño real del agente.
-
-    Corta el bucle por tope de iteraciones aunque el modelo quiera seguir:
-    un agente que no encuentra lo que busca puede reintentar indefinidamente
-    sin lanzar ningun error, solo consumiendo presupuesto.
+    1. La pregunta se agrega SIEMPRE, no solo cuando el historial esta vacio.
+       Sin esto, con memoria activada el turno 2 nunca veria la pregunta nueva.
+    2. Los campos del turno se reinician: sin esto, la evidencia del turno 1 se
+       cita en el turno 5 como si fuera de esta pregunta.
+    3. Se borran del historial los mensajes de herramientas de turnos
+       anteriores y se recorta la ventana. Arrastrarlos sube los tokens de cada
+       turno y contamina el `retrieval_context` que ADL mide en Faithfulness.
     """
-    limit = get_settings().max_agent_iterations
-    if state.get("turns", 0) >= limit:
-        log.warning("tope de %s iteraciones alcanzado; se pasa a redaccion", limit)
-        return "compose"
+    mensajes = state.get("messages") or []
+    borrar = [
+        RemoveMessage(id=m.id)
+        for m in mensajes
+        if getattr(m, "id", None)
+        and (getattr(m, "type", "") == "tool" or getattr(m, "tool_calls", None))
+    ]
 
-    last = state["messages"][-1]
-    if getattr(last, "tool_calls", None):
-        return "tools"
-    return "compose"
+    conservar = [m for m in mensajes if m not in borrar]
+    limite = VENTANA_TURNOS * 2
+    if len(conservar) > limite:
+        borrar += [
+            RemoveMessage(id=m.id)
+            for m in conservar[:-limite]
+            if getattr(m, "id", None) and getattr(m, "type", "") != "system"
+        ]
+
+    nuevos: list[Any] = list(borrar)
+    nuevos.append(HumanMessage(content=state["question"]))
+
+    return {"messages": nuevos, **TURNO_LIMPIO}
 
 
-def build_graph():
-    """Construye y compila el grafo. Llamar una vez al arrancar."""
+def planificar(state: AgentState) -> dict[str, Any]:
+    """Unica llamada del orquestador. En la replanificacion, la segunda."""
+    replans = state.get("replans", 0)
+    motivo, intentadas = "", []
+    if state.get("evidence") is not None and state.get("plan") and not state.get("suficiente"):
+        replans += 1
+        motivo = "ningun fragmento supero el umbral de similitud"
+        intentadas = [p.get("consulta", "") for p in state.get("plan", {}).get("pasos", [])]
+
+    plan = orchestrator.planificar(state["question"], motivo=motivo, intentadas=intentadas)
+    return {"plan": plan.model_dump(), "replans": replans}
+
+
+def ejecutar(state: AgentState) -> dict[str, Any]:
+    """Corre los pasos del plan. En paralelo si el plan lo pidio.
+
+    El paralelismo es real y barato: el documental recupera sobre FAISS y el
+    visualizador decide una vista; ninguno necesita la salida del otro.
+    """
+    plan = Plan.model_validate(state["plan"])
+    pasos = plan.pasos
+
+    # En una replanificacion solo se repite lo que fallo. El visualizador no
+    # depende de la evidencia: volver a emitir su vista seria pagar una segunda
+    # llamada por el mismo JSON.
+    if state.get("view_spec"):
+        pasos = [p for p in pasos if p.agente != executors.AGENTE_VISUALIZADOR]
+    if not pasos:
+        return {}
+
+    if plan.paralelo and len(pasos) > 1:
+        with ThreadPoolExecutor(max_workers=len(pasos)) as pool:
+            resultados = list(pool.map(executors.ejecutar, pasos))
+    else:
+        resultados = [executors.ejecutar(p) for p in pasos]
+
+    evidencia: list[dict[str, Any]] = []
+    vistos: set[str] = set()
+    findings: dict[str, str] = {}
+    view_spec = None
+    for r in resultados:
+        if r.error:
+            findings[r.agente] = f"[error] {r.error}"
+        elif r.texto:
+            findings[r.agente] = r.texto
+        if r.view_spec:
+            view_spec = r.view_spec
+        for e in r.evidencia:
+            # El corpus tiene fragmentos repetidos entre documentos: citarlos dos
+            # veces no agrega evidencia, solo gasta contexto.
+            if e["chunk_id"] not in vistos:
+                vistos.add(e["chunk_id"])
+                evidencia.append(e)
+
+    evidencia.sort(key=lambda e: -e.get("score", 0.0))
+
+    # La suficiencia la deciden SOLO los agentes que buscan evidencia. Una vista
+    # emitida no dice nada sobre si encontramos material: contarla como exito
+    # cancelaba la replanificacion de una busqueda que habia vuelto vacia.
+    # Y si ningun agente de evidencia corrio, no hay nada que replanificar:
+    # insistir costaria una llamada sin ninguna posibilidad de mejorar.
+    buscadores = [
+        r
+        for r in resultados
+        if r.agente in (executors.AGENTE_DOCUMENTAL, executors.AGENTE_ANALITICO)
+    ]
+    suficiente = not buscadores or any(r.suficiente for r in buscadores)
+
+    return {
+        "evidence": evidencia,
+        "findings": findings,
+        "view_spec": view_spec,
+        "suficiente": suficiente,
+    }
+
+
+def componer(state: AgentState) -> dict[str, Any]:
+    """Redacta y consolida. UNA llamada al modelo, y solo si hubo evidencia.
+
+    El analitico ya trae sus cifras redactadas sin gastar nada; el visualizador
+    ya emitio su vista. Lo unico que falta es convertir la evidencia documental
+    en prosa, y eso se hace aqui, una vez, con el texto final.
+
+    El orden es deliberado: primero la respuesta documental, que es la que
+    contesta la pregunta; despues las cifras, que la respaldan; al final el
+    aviso de la vista, que es una accion sobre el tablero y no parte de la
+    respuesta.
+    """
+    findings = dict(state.get("findings") or {})
+    evidencia = state.get("evidence") or []
+
+    # La UNICA redaccion del turno, sobre la evidencia ya consolidada. Aqui y no
+    # en el ejecutor: un plan de tres busquedas cuesta una redaccion, no tres, y
+    # tras una replanificacion la evidencia definitiva solo se conoce ahora.
+    documental = [e for e in evidencia if not str(e.get("chunk_id", "")).startswith("agregado:")]
+    if documental:
+        findings[executors.AGENTE_DOCUMENTAL] = executors.redactar(state["question"], documental)
+
+    partes: list[str] = []
+    for agente in (executors.AGENTE_DOCUMENTAL, executors.AGENTE_ANALITICO):
+        texto = findings.get(agente, "")
+        if texto and not texto.startswith("[error]"):
+            partes.append(texto)
+
+    if not partes and evidencia:
+        partes.append(
+            "No pude redactar una respuesta, pero estos son los fragmentos mas "
+            "relevantes del corpus:\n\n"
+            + "\n\n".join(
+                f"[{i}] ({e['citacion']}) {e['texto'][:500]}"
+                for i, e in enumerate(evidencia[:5], 1)
+            )
+        )
+
+    if state.get("view_spec"):
+        titulo = (state["view_spec"] or {}).get("titulo") or "la vista solicitada"
+        partes.append(f"He preparado {titulo} en el tablero.")
+
+    if not partes:
+        partes.append(
+            "No encontre evidencia en el corpus para responder esa consulta. El "
+            "corpus cubre inteligencia artificial y capacidades estrategicas, "
+            "seguridad del entorno espacial, y dinamicas territoriales en America "
+            "Latina; si reformulas la pregunta hacia alguno de esos temas, la "
+            "respondo con sus fuentes."
+        )
+
+    texto = "\n\n".join(partes)
+    return {"answer": texto, "messages": [AIMessage(content=texto)]}
+
+
+# -- aristas ----------------------------------------------------------------
+
+
+def tras_ejecutar(state: AgentState) -> Literal["planificar", "componer"]:
+    """Replanifica como maximo una vez, y solo si no hubo evidencia.
+
+    El tope es la diferencia entre un sistema que insiste y uno que se queda
+    dando vueltas gastando presupuesto sin lanzar ningun error.
+    """
+    if state.get("suficiente"):
+        return "componer"
+    if state.get("replans", 0) >= MAX_REPLANES:
+        log.info(
+            "evidencia insuficiente tras %s replanificacion(es); se redacta igual", MAX_REPLANES
+        )
+        return "componer"
+    return "planificar"
+
+
+def build_graph(checkpointer: Any = None):
+    """Construye y compila el grafo. Llamar una vez al arrancar.
+
+    Args:
+        checkpointer: memoria conversacional. Por defecto, la de
+            `src/agents/checkpoint.py` (SQLite). Pasar `False` para compilar sin
+            memoria.
+    """
+    if checkpointer is None:
+        from src.agents.checkpoint import get_checkpointer
+
+        checkpointer = get_checkpointer()
+
     g = StateGraph(AgentState)
-    g.add_node("reason", reason)
-    g.add_node("tools", ToolNode(registry.all()))
-    g.add_node("compose", compose)
+    g.add_node("begin", begin)
+    g.add_node("planificar", planificar)
+    g.add_node("ejecutar", ejecutar)
+    g.add_node("componer", componer)
 
-    g.add_edge(START, "reason")
-    g.add_conditional_edges("reason", route, {"tools": "tools", "compose": "compose"})
-    g.add_edge("tools", "reason")  # esta arista es lo que lo hace un agente
-    g.add_edge("compose", END)
-    return g.compile()
+    g.add_edge(START, "begin")
+    g.add_edge("begin", "planificar")
+    g.add_edge("planificar", "ejecutar")
+    g.add_conditional_edges(
+        "ejecutar", tras_ejecutar, {"planificar": "planificar", "componer": "componer"}
+    )
+    g.add_edge("componer", END)
+
+    return g.compile(checkpointer=checkpointer or None)
+
+
+__all__ = ["Paso", "build_graph"]
