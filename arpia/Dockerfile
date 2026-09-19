@@ -49,4 +49,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 # el threadpool de FastAPI, que comparte ambos en memoria y escala bien
 # (medido: 4 peticiones simultaneas no suben el pico y bajan la latencia por
 # consulta de 122 ms a 81 ms).
+# El entrypoint trae el indice si falta (ver entrypoint.sh) y delega en el CMD.
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
