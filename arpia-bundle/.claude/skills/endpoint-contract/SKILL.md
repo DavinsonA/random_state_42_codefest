@@ -1,6 +1,6 @@
 ---
 name: endpoint-contract
-description: Disenar y cambiar el contrato HTTP que consume el jurado. Usar al anadir o modificar un endpoint de src/api/, al cambiar un esquema Pydantic de respuesta, o antes de desplegar un cambio que toque /analyze, /retrieve, /health o /usage.
+description: Disenar y cambiar el contrato HTTP que consume el jurado. Usar al anadir o modificar un endpoint de src/api/, al cambiar un esquema Pydantic de respuesta, o antes de desplegar un cambio que toque /chat, /topics, /health o /usage.
 ---
 
 # Contrato del endpoint
@@ -14,7 +14,7 @@ por dentro.
 
 ## Esquemas aislados en un solo modulo
 Todos los `BaseModel` que forman el contrato publico viven en
-`src/api/main.py`, en la seccion `# -- contrato --`. No los repartas por
+`src/api/contracts.py`. No los repartas por
 otros modulos: un evaluador (o un companero de equipo bajo presion de
 tiempo) debe poder ver el contrato completo sin saltar de archivo en
 archivo.
@@ -23,7 +23,7 @@ Los modelos de dominio interno (p.ej. `Hit` en `src/retrieval/index.py`)
 son libres de cambiar de forma; los del contrato, no sin versionar.
 
 ## Versionado
-Este repo no versiona la URL (`/v1/analyze`) porque el contrato lo fija el
+Este repo no versiona la URL (`/v1/chat`) porque el contrato lo fija el
 handbook del reto, no el equipo. En su lugar:
 
 - El campo `mode` en cada respuesta (`stub` | `live`) evita que una demo
@@ -63,8 +63,8 @@ Una vez que el jurado empieza a apuntar al endpoint desplegado:
   20h (ver `CLAUDE.md`).
 
 ## Al conocer el reto
-Ajusta unicamente `AnalyzeRequest` / `AnalyzeResponse` (o los modelos que el
-handbook indique) para que coincidan EXACTAMENTE con el contrato publicado.
-No toques `/health`, `/usage` ni la estructura de `trace` salvo que el
-handbook lo pida explicitamente: esos son contrato de operacion, no del
-reto.
+El contrato de `/chat` (`ChatRequest` / `ChatResponse` en
+`src/api/contracts.py`) ya sigue la especificacion tecnica de ADL (§2.4).
+Cualquier aclaracion posterior del reto se refleja ahi y en
+`tests/test_contract.py`. `/health` y `/usage` son contrato de operacion, no
+del reto: no los toques salvo que ADL lo pida explicitamente.

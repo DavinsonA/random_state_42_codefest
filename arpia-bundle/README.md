@@ -42,7 +42,7 @@ lab/                       experimentos desechables — nada de aquí se desplie
 | Ningún secreto en el código | `scripts/preflight.py --secrets` |
 | Ninguna dependencia copyleft fuerte | `scripts/preflight.py --licenses` |
 | Todo bucle agéntico con tope de iteraciones | `scripts/preflight.py --iterations` |
-| Contrato HTTP congelado no cambia sin querer | `arpia/tests/test_contracts.py` |
+| Contrato HTTP congelado no cambia sin querer | `arpia/tests/test_contract.py` |
 | Una tool nunca tumba el grafo | `arpia/src/tools/registry.py` |
 
 ## Antes de desplegar
