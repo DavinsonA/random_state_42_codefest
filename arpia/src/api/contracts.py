@@ -240,6 +240,20 @@ class ViewSpec(BaseModel):
     )
 
 
+class HallazgoDetalle(BaseModel):
+    """Un hallazgo con lo que permite rastrearlo: sobre que categorias se calculo
+    y que documentos lo sustentan (RETO.md §3.3: toda afirmacion, hasta su fuente)."""
+
+    texto: str
+    soporte: list[str] = Field(
+        default_factory=list, description="Categorias de la agregacion sobre las que se calculo."
+    )
+    doc_ids: list[str] = Field(
+        default_factory=list,
+        description="Muestra de documentos que lo sustentan; abren en /api/document/{doc_id}.",
+    )
+
+
 class AgentResponse(BaseModel):
     """Respuesta de `POST /chat`. Los tres primeros campos son el contrato ADL."""
 
@@ -264,6 +278,13 @@ class AgentResponse(BaseModel):
             "Lo que las cifras de la vista dicen, calculado sin modelo: frecuencias y "
             "proporciones reales. Nunca indices, scores ni pronosticos (RETO.md "
             "§Restricciones duras)."
+        ),
+    )
+    hallazgos_detalle: list[HallazgoDetalle] = Field(
+        default_factory=list,
+        description=(
+            "Los mismos `hallazgos`, en el mismo orden, con su soporte y sus `doc_id`. "
+            "`hallazgos` se conserva tal cual para no romper a ningun cliente."
         ),
     )
     trace_id: str = Field(

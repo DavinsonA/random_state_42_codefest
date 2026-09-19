@@ -36,6 +36,7 @@ from src.api.contracts import (
     ChatRequest,
     Citation,
     Evaluacion,
+    HallazgoDetalle,
     Metadata,
     Tokens,
     TokensPorAgente,
@@ -112,7 +113,7 @@ def _build(
     agentes_extra: tuple[str, ...] = (),
     view_spec: ViewSpec | None = None,
     view_specs: list[ViewSpec] | None = None,
-    hallazgos: list[str] | None = None,
+    hallazgos: list[Any] | None = None,
 ) -> AgentResponse:
     """Arma el JSON de ADL con lo que el turno realmente registro.
 
@@ -156,7 +157,11 @@ def _build(
         citations=[Citation(**c) for c in turnlog.citations()],
         view_spec=view_spec,
         view_specs=view_specs or ([view_spec] if view_spec else []),
-        hallazgos=hallazgos or [],
+        hallazgos=[h.texto for h in hallazgos or []],
+        hallazgos_detalle=[
+            HallazgoDetalle(texto=h.texto, soporte=list(h.soporte), doc_ids=list(h.doc_ids))
+            for h in hallazgos or []
+        ],
         trace_id=tracing.current_trace_id() or "",
     )
 
@@ -202,7 +207,7 @@ def _vista_de_respaldo(texto: str, estado: str) -> ViewSpec | None:
     return vista
 
 
-def _componer_tablero(vista: ViewSpec | None) -> tuple[list[ViewSpec], list[str]]:
+def _componer_tablero(vista: ViewSpec | None) -> tuple[list[ViewSpec], list[Any]]:
     """Vistas de apoyo y hallazgos de la vista que emitio el agente. CERO tokens.
 
     Es el agente compositor, y vive en el lado API a proposito: necesita los
@@ -221,9 +226,8 @@ def _componer_tablero(vista: ViewSpec | None) -> tuple[list[ViewSpec], list[str]
         from src.api.dashboard import apoyo_de_vista, filas_de_vista
 
         vistas, hallazgos = apoyo_de_vista(vista, filas_de_vista(vista))
-        textos = [h.texto for h in hallazgos]
         turnlog.record_agent(compositor.AGENTE)
-        return vistas, textos
+        return vistas, hallazgos
     except Exception as exc:  # noqa: BLE001 - frontera: el apoyo nunca tumba el turno
         log.warning("el compositor fallo (%s); se devuelve solo la vista principal", exc)
         return [vista], []
@@ -347,7 +351,7 @@ def _turno(texto: str, session_id: str) -> AgentResponse:
     if view_spec is None and not s.is_stub:
         view_spec = _vista_de_respaldo(texto, estado)
 
-    vistas, hallazgos_texto = _componer_tablero(view_spec)
+    vistas, hallazgos = _componer_tablero(view_spec)
     construida = _build(
         texto,
         respuesta,
@@ -355,7 +359,7 @@ def _turno(texto: str, session_id: str) -> AgentResponse:
         start,
         view_spec=view_spec,
         view_specs=vistas,
-        hallazgos=hallazgos_texto,
+        hallazgos=hallazgos,
     )
 
     # 5. Memoria: se guarda lo que costo producir. No se cachea un error ni un

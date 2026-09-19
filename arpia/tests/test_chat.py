@@ -336,6 +336,41 @@ def test_un_fallo_del_respaldo_no_tumba_la_respuesta(live, monkeypatch):
     assert resp.json()["view_spec"] is None and resp.json()["metadata"]["estado"] == "ok"
 
 
+# -- hallazgos_detalle: cada frase del tablero, rastreable ---------------------
+
+
+class GrafoConVista(FakeGraph):
+    def invoke(self, state, config=None):
+        resultado = super().invoke(state, config)
+        resultado["view_spec"] = {"chart": "donut", "group_by": "organizacion", "fenomenos": ["F3"]}
+        return resultado
+
+
+def test_los_hallazgos_llegan_tambien_con_soporte_y_doc_ids(live, monkeypatch):
+    from src.retrieval import aggregates
+
+    tabla = [
+        {"doc_id": f"F3-{o}-{i}", "fenomeno": "F3", "organizacion": o, "formato": "pdf",
+         "anio": None, "n_fragmentos": 1}
+        for o, n in (("Alertas", 6), ("SIPRI", 4), ("A", 1), ("B", 1), ("C", 1))
+        for i in range(n)
+    ]  # fmt: skip
+    monkeypatch.setattr(aggregates, "tabla", lambda: tabla)
+    client, _ = live(GrafoConVista())
+    body = _chat(client, "muestra la dona por organizacion").json()
+    assert body["hallazgos"], "un reparto concentrado tiene algo que decir"
+    detalle = body["hallazgos_detalle"]
+    assert [d["texto"] for d in detalle] == body["hallazgos"], "mismo orden, mismo texto"
+    assert all(d["soporte"] and d["doc_ids"] for d in detalle)
+    assert all(doc.startswith("F3-") for d in detalle for doc in d["doc_ids"])
+
+
+def test_sin_vista_no_hay_hallazgos_ni_detalle(live):
+    client, _ = live(FakeGraph())
+    body = _chat(client, "que reporta el corpus").json()
+    assert body["hallazgos"] == [] and body["hallazgos_detalle"] == []
+
+
 # -- agentes_invocados incluye a los que no gastan tokens -------------------
 
 

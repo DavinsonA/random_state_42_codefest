@@ -176,6 +176,11 @@ prohíbe que haya más).
   "citations": [ { "doc_id": "…", "chunk_id": "…", "fuente": "…", "fragmento": "…",
                    "formato": "pdf", "posicion": 12, "total_fragmentos": 87, "anio": 2019 } ],
   "view_spec": null,                     // ViewSpec (§4) solo si el turno pide una vista
+  "view_specs": [],                      // la pedida (siempre primera) + hasta 2 de apoyo
+  "hallazgos": [],                       // frases que las cifras de la vista ya dicen (0 tokens)
+  "hallazgos_detalle": [                 // los mismos, en el mismo orden, rastreables
+    { "texto": "…", "soporte": ["Alertas_Tempranas", "SIPRI"], "doc_ids": ["F3-ALERTAS-001"] }
+  ],
   "trace_id": "…"                        // correlaciona con GET /api/trace/{trace_id}
 }
 ```
@@ -192,7 +197,8 @@ Nada se fabrica: todo sale de lo que el turno **realmente registró**.
 | `tools_called` | `@registry.register`, o `turnlog.record_tool_call` a mano | ver hallazgo §12 #4: el documental hoy **no** anota `buscar_corpus` |
 | `tokens`, `tokens_por_agente`, `num_interacciones` | orquestador, `redactar`, visualizador | `usage.record_usage(..., agent=, model=)` en cada llamada al LLM |
 | `latencia_ms`, `estado`, `mode` | API | medidos en `chat.py` |
-| `view_spec` | agente visualizador | `ViewSpec` validado; uno inválido se descarta (`_leer_view_spec`) |
+| `view_spec` | agente visualizador | `ViewSpec` validado; uno inválido se descarta (`_leer_view_spec`). Si el visualizador intervino y no dejó una válida, `vista_respaldo` la reconstruye sin modelo desde los parámetros del conteo del analista |
+| `view_specs`, `hallazgos`, `hallazgos_detalle` | compositor (0 tokens) | `dashboard.apoyo_de_vista`: el mismo camino que `POST /api/view`. `hallazgos` es solo el texto, `hallazgos_detalle` añade `soporte` y `doc_ids` para llegar a la fuente |
 
 Regla del validador de `Metadata`: si hay `tokens_por_agente`, `tokens` se **recalcula**
 como su suma. ADL marca como inconsistencia reportar en `tokens.total` menos de lo que

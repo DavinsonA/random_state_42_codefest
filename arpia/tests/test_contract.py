@@ -122,6 +122,7 @@ def test_response_tiene_los_tres_bloques_de_adl_y_los_campos_propios():
         "view_spec",
         "view_specs",
         "hallazgos",
+        "hallazgos_detalle",
         "trace_id",
     }
     assert body["evaluacion"].keys() == {

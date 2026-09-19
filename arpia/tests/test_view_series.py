@@ -148,7 +148,7 @@ def test_chat_y_view_dicen_lo_mismo_de_la_misma_vista():
     spec = {"chart": "bar", "group_by": "organizacion", "fenomenos": ["F3"]}
     vistas, textos = _componer_tablero(ViewSpec.model_validate(spec))
     r = _view(**spec)
-    assert textos == [h["texto"] for h in r["hallazgos"]]
+    assert [h.texto for h in textos] == [h["texto"] for h in r["hallazgos"]]
     assert len(vistas) - 1 == len(r["complementarias"])
 
 
