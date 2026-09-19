@@ -235,3 +235,51 @@ def test_serie_por_no_esta_en_el_esquema_que_ve_el_visualizador():
     from src.api.contracts import ViewSpec
 
     assert "serie_por" not in ViewSpec.model_json_schema()["properties"]
+
+
+# -- reglas por componente (/api/components) -----------------------------------
+
+
+def test_components_publica_las_reglas_de_cada_grafico():
+    from src.api.contracts import ChartType, GroupBy
+
+    r = client.get("/api/components").json()
+    assert set(r["reglas"]) == set(ChartType.__args__), "ningun componente sin reglas"
+    for chart, regla in r["reglas"].items():
+        assert set(regla["group_by"]) <= set(GroupBy.__args__), chart
+        if regla["por_defecto"]:
+            assert regla["por_defecto"] in regla["group_by"], chart
+    assert r["limites"] == {
+        "categorias": aggregates.MAX_CATEGORIAS,
+        "series": aggregates.MAX_SERIES,
+    }
+
+
+def test_las_reglas_dicen_lo_que_el_endpoint_hace():
+    """Lo que se anuncia es lo que se cumple: el tablero se fia de este catalogo."""
+    reglas = client.get("/api/components").json()["reglas"]
+    assert reglas["timeline"]["group_by"] == ["anio"] and reglas["timeline"]["nota_obligatoria"]
+    assert "anio" not in reglas["donut"]["group_by"] and reglas["kpi"]["group_by"] == []
+    # un timeline agrupa por ano aunque se pida otra cosa
+    assert _view(chart="timeline", group_by="organizacion")["group_by"] == "anio"
+    # y la segunda dimension solo existe donde la regla lo dice
+    for chart, regla in reglas.items():
+        spec = {"chart": chart, "group_by": "organizacion", "serie_por": "formato"}
+        from src.api.contracts import ViewSpec
+
+        assert (ViewSpec.model_validate(spec).serie_por is not None) == regla["serie_por"], chart
+
+
+def test_un_timeline_con_serie_por_anio_se_corrige_aunque_el_group_by_sea_otro():
+    from src.api.contracts import ViewSpec
+
+    assert ViewSpec(chart="timeline", group_by="organizacion", serie_por="anio").serie_por is None
+
+
+def test_el_catalogo_del_visualizador_no_cambia():
+    """Las reglas son del endpoint: lo que lee el modelo se queda como estaba."""
+    import json
+
+    from src.tools.analytics import componentes_disponibles
+
+    assert "reglas" not in json.loads(componentes_disponibles())

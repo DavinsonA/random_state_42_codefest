@@ -832,6 +832,22 @@ Cada fila de `/api/aggregate` trae solo una muestra de 10 `doc_id`; esta es la l
 - Con `desde`/`hasta`, el `aviso` declara cuántos documentos deja fuera el rango (todos los que no declaran año).
 - **Los parámetros inválidos de cualquier ruta `/api/*` devuelven `{disponible: false, motivo}` con 200.** Antes el manejador global contestaba con una respuesta de chat ("No se recibió ninguna consulta"), que no tenía relación con lo pedido.
 
+### `GET /api/components` — qué admite cada componente
+
+Además del catálogo de dimensiones con valores reales, devuelve `reglas` (una entrada por gráfico) y `limites`:
+
+```json
+"reglas": {
+  "timeline": {"group_by": ["anio"], "serie_por": true, "nota_obligatoria": true, "por_defecto": "anio"},
+  "donut":    {"group_by": ["fenomeno", "organizacion", "fuente", "formato"], "serie_por": false,
+               "nota_obligatoria": false, "por_defecto": "fenomeno"},
+  "kpi":      {"group_by": [], "serie_por": false, "nota_obligatoria": false, "por_defecto": null}
+},
+"limites": {"categorias": 25, "series": 8}
+```
+
+Son la misma fuente (`contracts.REGLAS_GRAFICO`) que usan el validador de `ViewSpec` y `POST /api/view`, así que lo que se anuncia es lo que se cumple: un `timeline` agrupa siempre por año, y `serie_por` solo existe donde la regla lo dice. El tablero puede leerlas en lugar de repetirlas en JavaScript (donde `normalizar()` ya divergió: forzaba cada dona a agrupar por fenómeno). Las reglas van **solo** en el endpoint: `componentes_disponibles()` también es lo que lee el visualizador y no se toca.
+
 ### Referencias: ver de dónde sale cada afirmación (hecho en backend y en el chat)
 
 ADL sugirió que, al pasar el ratón por una referencia, se vea de dónde sale, y que con un clic se

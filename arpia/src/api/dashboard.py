@@ -63,9 +63,17 @@ def components() -> JSONResponse:
     try:
         import json
 
+        from src.api.contracts import REGLAS_GRAFICO
+        from src.retrieval.aggregates import MAX_CATEGORIAS, MAX_SERIES
         from src.tools.analytics import componentes_disponibles
 
-        return JSONResponse(content=json.loads(componentes_disponibles()))
+        # Las reglas van AQUI y no en `componentes_disponibles`: esa funcion tambien
+        # es lo que lee el visualizador, y cambiar lo que el modelo lee mueve sus
+        # decisiones (medido: un campo de mas cambio F3 por F1).
+        catalogo = json.loads(componentes_disponibles())
+        catalogo["reglas"] = REGLAS_GRAFICO
+        catalogo["limites"] = {"categorias": MAX_CATEGORIAS, "series": MAX_SERIES}
+        return JSONResponse(content=catalogo)
     except Exception as exc:  # noqa: BLE001 - el tablero nunca recibe un 500
         log.warning("catalogo no disponible: %s", exc)
         return _error(f"catalogo no disponible: {type(exc).__name__}")
@@ -208,14 +216,17 @@ def timeline(
 def dimension_efectiva(vista: Any) -> str:
     """Por que dimension agrupa realmente una vista.
 
-    Una vista temporal agrupa por año aunque el agente no lo diga: es la unica
-    granularidad que el corpus sostiene y evita una serie de una sola barra.
+    Una vista temporal agrupa por año diga lo que diga el agente: es la unica
+    granularidad que el corpus sostiene, y una linea de tiempo por organizacion
+    no es una linea de tiempo (`REGLAS_GRAFICO`).
 
     Vive aqui, en una sola funcion, porque el criterio lo usan dos caminos
     —`POST /api/view` y el compositor del turno— y dos copias del mismo criterio
     divergen a la primera que alguien toque una.
     """
-    return vista.group_by or ("anio" if vista.chart == "timeline" else "fenomeno")
+    if vista.chart == "timeline":
+        return "anio"
+    return vista.group_by or "fenomeno"
 
 
 def filas_de_vista(vista: Any) -> list[dict[str, Any]]:

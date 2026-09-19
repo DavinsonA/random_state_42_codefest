@@ -42,10 +42,49 @@ ChartType = Literal["timeline", "bar", "stacked_bar", "donut", "table", "kpi"]
 # `organizacion` y `anio` son DERIVADAS, no inventadas (ver src/retrieval/enrich.py):
 #   organizacion -> segundo nivel de la ruta `fuente` (CSIS_Aerospace, CSET_Georgetown...)
 #   anio         -> ano en el nombre de archivo; cubre 622 de 1.826 documentos (34%)
-#: Graficos que pueden separar sus series por una segunda dimension.
-SERIE_POR_CHARTS = ("bar", "stacked_bar", "timeline")
-
 GroupBy = Literal["fenomeno", "organizacion", "fuente", "formato", "anio"]
+
+#: Que admite cada componente. UNA sola fuente para el validador de `ViewSpec`,
+#: para `POST /api/view` y para `GET /api/components`: el tablero lee de aqui en
+#: vez de repetir estas reglas en JavaScript (donde ya divergieron: forzaba
+#: cada dona a agrupar por fenomeno). `group_by` vacio = el componente no agrupa.
+REGLAS_GRAFICO: dict[str, dict[str, Any]] = {
+    "timeline": {
+        "group_by": ["anio"],
+        "serie_por": True,
+        "nota_obligatoria": True,
+        "por_defecto": "anio",
+    },
+    "bar": {
+        "group_by": ["fenomeno", "organizacion", "fuente", "formato", "anio"],
+        "serie_por": True,
+        "nota_obligatoria": False,
+        "por_defecto": "fenomeno",
+    },
+    "stacked_bar": {
+        "group_by": ["fenomeno", "organizacion", "fuente", "formato", "anio"],
+        "serie_por": True,
+        "nota_obligatoria": False,
+        "por_defecto": "organizacion",
+    },
+    "donut": {
+        "group_by": ["fenomeno", "organizacion", "fuente", "formato"],
+        "serie_por": False,
+        "nota_obligatoria": False,
+        "por_defecto": "fenomeno",
+    },
+    "table": {
+        "group_by": ["fenomeno", "organizacion", "fuente", "formato", "anio"],
+        "serie_por": False,
+        "nota_obligatoria": False,
+        "por_defecto": "fenomeno",
+    },
+    "kpi": {"group_by": [], "serie_por": False, "nota_obligatoria": False, "por_defecto": None},
+}
+
+#: Graficos que pueden separar sus series por una segunda dimension.
+SERIE_POR_CHARTS = tuple(c for c, r in REGLAS_GRAFICO.items() if r["serie_por"])
+
 
 # Solo conteos y frecuencias. `RETO.md` prohibe presentar como medicion
 # objetiva cualquier indice, score de riesgo o nivel de amenaza calculado
@@ -258,7 +297,7 @@ class ViewSpec(BaseModel):
         vista descartada por un campo de mas deja al usuario sin grafico. El
         cruce solo tiene sentido si es distinto del eje y el componente lo usa.
         """
-        eje = self.group_by or ("anio" if self.chart == "timeline" else None)
+        eje = "anio" if self.chart == "timeline" else self.group_by
         if self.serie_por is not None and (
             self.serie_por == eje or self.chart not in SERIE_POR_CHARTS
         ):
