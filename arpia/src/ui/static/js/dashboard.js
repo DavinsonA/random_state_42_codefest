@@ -245,12 +245,12 @@ async function vistaMapaSinDato() {
             .filter(Boolean)
             .map((f) => f.trim().replace(/[.\s]+$/, ""))
             .map((f) => f[0].toUpperCase() + f.slice(1));
-        texto = frases.length ? `${frases.join(". ")}.` : t("prov.mapa.nota");
+        texto = frases.length ? `${frases.join(". ")}.` : t("tablero.mapa.sinDatos");
     } catch {
-        texto = t("prov.mapa.nota");
+        texto = t("tablero.mapa.sinDatos");
     }
     return {
-        titulo: t("prov.mapa"),
+        titulo: t("tablero.mapa"),
         origen: "sin_datos",
         nota: "",
         dibujar: mensaje(texto),
@@ -261,17 +261,17 @@ async function vistaMapaSinDato() {
  *  Etapa 1 y no forma parte de esta base. */
 function vistaRelacionesSinDato() {
     return {
-        titulo: t("prov.relaciones"),
+        titulo: t("tablero.relaciones"),
         origen: "sin_datos",
         nota: "",
-        dibujar: mensaje(t("prov.relaciones.nota")),
+        dibujar: mensaje(t("tablero.relaciones.sinDatos")),
     };
 }
 
 /** Lo que se ve al abrir el tablero: dos vistas reales y dos declaraciones. */
 async function vistasIniciales() {
     const conDatos = await Promise.all(
-        [VISTA_TIEMPO_INICIAL, VISTA_INICIAL].map(vistaDelAgente),
+        [VISTA_TIEMPO_INICIAL, VISTA_INICIAL].map((spec) => vistaDelAgente(spec, { inicial: true })),
     );
     return [...conDatos, await vistaMapaSinDato(), vistaRelacionesSinDato()];
 }
@@ -379,12 +379,12 @@ function dibujanteDe(spec, filas, total) {
 }
 
 /** Carga los datos de un ViewSpec y lo convierte en vista. Nunca lanza. */
-async function vistaDelAgente(spec) {
+async function vistaDelAgente(spec, { inicial = false } = {}) {
     const titulo = spec.titulo || tituloPorDefecto(spec);
     const { datos, error } = await cargar(spec, { modoStub: estado.modoStub });
 
     if (error) {
-        return { titulo, origen: "provisional", nota: `${NOMBRE_CHART[spec.chart]}. ${error}`, dibujar: mensaje(t("tablero.sinDatosTodavia")) };
+        return { titulo, origen: "sin_datos", nota: `${NOMBRE_CHART[spec.chart]}. ${error}`, dibujar: mensaje(t("tablero.sinDatosTodavia")) };
     }
 
     const notas = [spec.nota, datos.nota];
@@ -393,10 +393,10 @@ async function vistaDelAgente(spec) {
         notas.push(t("nota.cobertura", { con: fmt.format(con_dato), total: fmt.format(total), pct: Math.round((con_dato / total) * 100) }));
     }
     const nota = [...new Set(notas.filter(Boolean))].join(" ");
-    const origen = datos.simulado ? "simulado" : "agente";
+    const origen = datos.simulado ? "simulado" : inicial ? "corpus" : "agente";
 
     if (!datos.filas.length) {
-        return { titulo, origen, nota, dibujar: mensaje(t("tablero.sinDatosFiltros")) };
+        return { titulo, origen: datos.simulado ? "simulado" : "sin_datos", nota, dibujar: mensaje(t("tablero.sinDatosFiltros")) };
     }
     return { titulo, origen, nota, dibujar: dibujanteDe(spec, datos.filas, datos.total) };
 }
@@ -437,13 +437,11 @@ function crearPanel(vista, { ancho = false, alto = false } = {}) {
     ampliar.append(iconoAmpliar());
     ampliar.addEventListener("click", () => abrirAmpliado(vista));
     const acciones = el("div", "grafico-acciones");
-    // Solo se marca el origen cuando informa algo: "Simulado" (datos de prueba)
-    // o "Del agente". Los graficos de ejemplo ya lo dicen en su nota.
-    if (vista.origen !== "provisional") {
-        const insignia = el("span", "insignia-panel", t(`tablero.origen.${vista.origen}`));
-        insignia.dataset.origen = vista.origen;
-        acciones.append(insignia);
-    }
+    // Todo panel dice de donde vienen sus datos: del corpus, del agente, simulado
+    // (solo en modo stub) o sin datos.
+    const insignia = el("span", "insignia-panel", t(`tablero.origen.${vista.origen}`));
+    insignia.dataset.origen = vista.origen;
+    acciones.append(insignia);
     acciones.append(ampliar);
     cabeza.append(el("h3", null, vista.titulo), acciones);
 
@@ -591,7 +589,7 @@ function mostrarRespuesta(datos) {
 async function aplicarVistas(specs) {
     if (!specs.length) return;
     const turno = ++estado.carga;
-    const vistas = await Promise.all(specs.map(vistaDelAgente));
+    const vistas = await Promise.all(specs.map((s) => vistaDelAgente(s)));
     if (turno !== estado.carga) return;  // llego otra respuesta mientras cargaba
 
     // Dos vistas con el mismo titulo (p. ej. dona y barras "por fenomeno") se

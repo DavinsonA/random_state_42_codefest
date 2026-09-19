@@ -34,7 +34,7 @@ export const VISTA_INICIAL = {
     desde: null,
     hasta: null,
     group_by: "fenomeno",
-    titulo: "Documentos por fenómeno",
+    titulo: "",  // vacio: el titulo por defecto sale traducido (tituloPorDefecto)
     nota: "",
 };
 
@@ -151,17 +151,15 @@ export const VISTA_TIEMPO_INICIAL = {
     desde: null,
     hasta: null,
     group_by: "anio",
-    titulo: "Documentos por año",
+    titulo: "",  // vacio: el titulo por defecto sale traducido (tituloPorDefecto)
     nota: "",
 };
 
 /** Traduce los motivos de `disponible: false` a un mensaje para el analista. */
 export function mensajeIndice(motivo) {
     const m = String(motivo || "");
-    if (m.startsWith("indice no disponible")) {
-        return "El índice del corpus todavía no está disponible. La vista se mostrará en cuanto lo esté.";
-    }
-    return m ? `No hay datos disponibles: ${m}.` : "No se pudieron cargar los datos de la vista.";
+    if (m.startsWith("indice no disponible")) return t("error.indice");
+    return m ? t("error.sinDatosMotivo", { motivo: m }) : t("error.datos");
 }
 
 /** Une las coberturas de varias peticiones (una por fenomeno) en una sola.
