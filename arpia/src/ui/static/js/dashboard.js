@@ -29,7 +29,7 @@ import {
     vistasDesdeHash,
 } from "./viewspec.js";
 import { conIdioma, mensajeError, montarSelector, t } from "./i18n.js";
-import { descargarInforme } from "./informe.js";
+import { capturarGraficas, descargarInforme } from "./informe.js";
 import { abrirVisor, enlazarReferencias } from "./referencias.js";
 import { conTransicion, paginaLista, suavizarEnlace } from "./transiciones.js";
 
@@ -729,7 +729,7 @@ function mostrarRespuesta(datos) {
     if (boton) {
         boton.hidden = false;
         boton.onclick = () =>
-            descargarInforme(estado.ultimaPregunta || "", datos, { vistas: estado.specs || [] });
+            descargarInforme(estado.ultimaPregunta || "", datos, { graficas: capturarGraficas(document, tok("surface")) });
     }
 
     // Las citas del texto se vuelven interactivas: al pulsarlas abren el
