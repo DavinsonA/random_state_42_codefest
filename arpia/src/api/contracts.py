@@ -256,6 +256,13 @@ class HealthResponse(BaseModel):
     index_loaded: bool
     gateway_reachable: bool
     agent_card_loaded: bool
+    memoria_persistente: bool = Field(
+        False,
+        description=(
+            "Memoria conversacional en disco. False = vive en RAM y se pierde en "
+            "cada redespliegue: el hilo de una conversacion no sobrevive."
+        ),
+    )
     encoder_listo: bool = Field(
         False, description="Encoder local en memoria: el cache semantico solo opera si es True."
     )

@@ -24,6 +24,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from src.agents import checkpoint
 from src.agents.card import agent_ids, load_card
 from src.api import chat as chat_mod
 from src.api import routing, session
@@ -189,6 +190,7 @@ def health(response: Response) -> HealthResponse:
         index_loaded=index_loaded,
         gateway_reachable=gateway_reachable,
         agent_card_loaded=card_loaded,
+        memoria_persistente=checkpoint.es_persistente(),
         encoder_listo=encoder.loaded(),
         agentes_registrados=agent_ids(),
         tools_registered=tools,
