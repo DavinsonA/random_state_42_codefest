@@ -21,7 +21,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.agents.card import model_for
+from src.agents.card import gateway_model_for, model_for
 from src.agents.plan import Paso
 from src.config import get_logger, get_settings
 from src.observability import tracing, turnlog, usage
@@ -129,7 +129,7 @@ def _llm(agente: str):
     return ChatOpenAI(
         base_url=s.llm_base_url,
         api_key=s.llm_api_key,
-        model=model_for(agente) or s.llm_model,
+        model=gateway_model_for(agente) or s.llm_model,
         timeout=s.request_timeout_s,
         temperature=0,
     )

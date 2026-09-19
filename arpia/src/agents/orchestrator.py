@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.agents.card import model_for
+from src.agents.card import gateway_model_for, model_for
 from src.agents.plan import MAX_PASOS, Plan, plan_de_respaldo
 from src.config import get_logger, get_settings
 from src.observability import tracing, usage
@@ -83,7 +83,7 @@ def _llm():
     return ChatOpenAI(
         base_url=s.llm_base_url,
         api_key=s.llm_api_key,
-        model=model_for(AGENTE) or s.llm_model,
+        model=gateway_model_for(AGENTE) or s.llm_model,
         timeout=s.request_timeout_s,
         temperature=0,
     )

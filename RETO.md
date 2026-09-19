@@ -4,6 +4,9 @@
 > verdad del equipo.** Reemplaza toda planeación previa basada en supuestos.
 > Ante conflicto entre este archivo y cualquier otro documento del repo, manda
 > la Especificación Técnica de ADL.
+>
+> **Qué está construido y qué falta** (endpoints, contratos, `POST /chat`, guardián,
+> caché, despliegue, pendientes): [`arpia/API.md`](arpia/API.md).
 
 ---
 
