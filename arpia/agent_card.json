@@ -4,10 +4,13 @@
     "descripcion": "Asistente de analisis de fuentes abiertas sobre el corpus de los tres fenomenos del reto (inteligencia artificial en entornos militares, seguridad espacial y orbita baja terrestre, dinamicas territoriales en America Latina). Responde preguntas en lenguaje natural con evidencia citada y genera o actualiza visualizaciones del tablero a partir de instrucciones del usuario.",
     "version": "1.0.0",
     "endpoint": "https://agent.random-state-42.codefest2026.augusta.avaldigitallabs.com/chat",
-    "input_modes": ["text/plain"],
-    "output_modes": ["application/json"]
+    "input_modes": [
+      "text/plain"
+    ],
+    "output_modes": [
+      "application/json"
+    ]
   },
-
   "orquestador": {
     "nombre": "Orquestador A.R.P.I.A.",
     "descripcion": "Recibe la consulta del usuario y decide a que agente especializado delegarla: al agente documental si la pregunta requiere evidencia textual del corpus, al agente visualizador si el usuario pide ver, comparar o filtrar datos en el tablero, o a ambos si la consulta lo requiere. Mantiene el hilo conversacional y consolida la respuesta final. No responde preguntas de contenido por si mismo.",
@@ -17,16 +20,28 @@
       {
         "name": "delegar_documental",
         "descripcion": "Delega la consulta al agente documental cuando la respuesta requiere evidencia textual del corpus: hechos, cifras, declaraciones, descripciones de eventos o actores.",
-        "input_parameters": { "consulta": "string", "fenomeno": "string" }
+        "input_parameters": {
+          "consulta": "string",
+          "fenomeno": "string"
+        }
       },
       {
         "name": "delegar_visualizacion",
         "descripcion": "Delega al agente visualizador cuando el usuario pide ver, graficar, mapear, comparar en el tiempo o filtrar datos en el tablero.",
-        "input_parameters": { "instruccion": "string" }
+        "input_parameters": {
+          "instruccion": "string"
+        }
+      },
+      {
+        "name": "delegar_analitico",
+        "descripcion": "Delega al agente analitico cuando la pregunta es cuantitativa sobre la metadata agregada: cuantos documentos, distribuciones, comparaciones de volumen. Indica la dimension de agrupacion.",
+        "input_parameters": {
+          "consulta": "string",
+          "group_by": "string"
+        }
       }
     ]
   },
-
   "subagentes": [
     {
       "id": "agente_documental",
@@ -44,16 +59,21 @@
         {
           "name": "buscar_corpus",
           "descripcion": "Busca fragmentos relevantes en el indice vectorial. Una sola idea por consulta: para comparar dos temas se hacen dos busquedas separadas. No repite una consulta ya lanzada en el mismo turno.",
-          "input_parameters": { "query": "string", "k": "integer", "fenomeno": "string" }
+          "input_parameters": {
+            "query": "string",
+            "k": "integer",
+            "fenomeno": "string"
+          }
         },
         {
           "name": "detalle_documento",
           "descripcion": "Devuelve la metadata de procedencia de documentos ya identificados por una busqueda previa: fuente, formato, fenomeno e idioma. No sirve para descubrir documentos nuevos.",
-          "input_parameters": { "doc_ids": "string" }
+          "input_parameters": {
+            "doc_ids": "string"
+          }
         }
       ]
     },
-
     {
       "id": "agente_visualizador",
       "nombre": "Agente generador de visualizaciones",
@@ -85,7 +105,6 @@
         }
       ]
     },
-
     {
       "id": "agente_analitico",
       "nombre": "Agente analitico",
@@ -108,6 +127,19 @@
           }
         }
       ]
+    },
+    {
+      "id": "verificador",
+      "nombre": "Verificador de evidencia",
+      "descripcion": "AGENTE ADICIONAL (puntos extra). Contrasta la respuesta redactada contra la evidencia que la sustenta antes de devolverla. La deteccion es determinista y no consume tokens: compara los identificadores de documento citados contra los recuperados en el turno. Solo cuando detecta una cita sin respaldo, o una respuesta extensa que no se apoya en ninguna fuente, gasta una llamada para corregirla; si no puede, degrada a una declaracion explicita de falta de evidencia en vez de devolver una afirmacion infundada.",
+      "modelo": "llama-3.3-70b-instruct",
+      "proveedor": "meta",
+      "activado_por": "condicion de la respuesta, no por el orquestador",
+      "ejemplos_de_activacion": [
+        "La respuesta cita un documento que no se recupero en este turno",
+        "La respuesta afirma varios parrafos sin apoyarse en ninguna fuente"
+      ],
+      "tools": []
     }
   ]
 }

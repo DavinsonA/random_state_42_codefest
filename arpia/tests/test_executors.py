@@ -346,3 +346,45 @@ def test_el_analitico_obedece_la_dimension_del_plan(llm):
 def test_sin_dimension_en_el_plan_se_recurre_a_la_heuristica(llm):
     paso = Paso(agente="agente_analitico", consulta="cuantos documentos por tema")
     assert "F1: 2 documentos" in executors.analitico(paso).texto
+
+
+# -- la delegacion del orquestador queda en la trayectoria -------------------
+
+
+def _card() -> dict:
+    import json
+    from pathlib import Path
+
+    return json.loads(Path("agent_card.json").read_text("utf-8"))
+
+
+def test_la_delegacion_aparece_en_tools_called(indice, llm):
+    """ADL evalua el bloque de diseno cruzando la agent card contra la traza. El
+    orquestador delega emitiendo un paso del plan, no llamando a una tool: sin
+    anotarlo, su funcion principal nunca aparecia en `tools_called`."""
+    indice()
+    executors.ejecutar(Paso(agente="agente_documental", consulta="satelites", fenomeno="F2"))
+    llamadas = turnlog.tool_calls()
+    assert [t["name"] for t in llamadas] == ["delegar_documental", "buscar_corpus"]
+    assert llamadas[0]["input_parameters"] == {"consulta": "satelites", "fenomeno": "F2"}
+
+
+def test_cada_agente_usa_el_nombre_de_delegacion_que_declara_la_card():
+    card = _card()
+    declaradas = {t["name"] for t in card["orquestador"]["tools"]}
+    usadas = {nombre for nombre, _ in executors.DELEGACIONES.values()}
+    assert usadas == declaradas, "la card y el codigo deben nombrar igual la delegacion"
+
+
+def test_los_argumentos_anotados_son_los_que_declara_la_card():
+    card = _card()
+    por_nombre = {t["name"]: set(t["input_parameters"]) for t in card["orquestador"]["tools"]}
+    for nombre, campos in executors.DELEGACIONES.values():
+        assert set(campos) == por_nombre[nombre], nombre
+
+
+def test_la_delegacion_al_visualizador_usa_instruccion(llm):
+    executors.ejecutar(Paso(agente="agente_visualizador", consulta="grafica esto"))
+    primera = turnlog.tool_calls()[0]
+    assert primera["name"] == "delegar_visualizacion"
+    assert primera["input_parameters"] == {"instruccion": "grafica esto"}

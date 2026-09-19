@@ -29,7 +29,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.agents import guardian, memory
+from src.agents import budget, guardian, memory
 from src.api import stub
 from src.api.contracts import (
     AgentResponse,
@@ -231,6 +231,7 @@ def run_chat(texto: str, session_id: str) -> AgentResponse:
     tracing.start_trace()
     usage.start_request()
     turnlog.start_turn()
+    budget.start_turn(s.turn_budget_s)
 
     # 1. Guardian de entrada. Cero tokens.
     veredicto = guardian.revisar_entrada(texto)
@@ -245,7 +246,7 @@ def run_chat(texto: str, session_id: str) -> AgentResponse:
     texto = veredicto.texto
 
     # 2. Memoria. Un acierto ahorra el turno entero.
-    cacheada = memory.cache.buscar(texto)
+    cacheada = memory.cache.buscar(texto, session_id)
     if cacheada is not None:
         cacheada.metadata.latencia_ms = int((time.perf_counter() - start) * 1000)
         return cacheada
@@ -290,5 +291,5 @@ def run_chat(texto: str, session_id: str) -> AgentResponse:
     #    rechazo: repetirlos sale gratis y cachearlos congelaria un fallo
     #    transitorio durante toda la ventana de evaluacion.
     if not estado.startswith(("error", "rechazado")):
-        memory.cache.guardar(texto, construida)
+        memory.cache.guardar(texto, construida, session_id)
     return construida

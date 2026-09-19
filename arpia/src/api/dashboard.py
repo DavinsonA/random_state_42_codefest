@@ -76,6 +76,9 @@ def aggregate(
     try:
         from src.retrieval import aggregates
 
+        if not aggregates.disponible():
+            return _error("el corpus aun no esta cargado en este despliegue")
+
         lista = [f.strip().upper() for f in fenomenos.split(",") if f.strip()]
         datos = aggregates.agregar(
             metrica=metrica,  # type: ignore[arg-type]
@@ -106,6 +109,9 @@ def timeline(
     """
     try:
         from src.retrieval import aggregates
+
+        if not aggregates.disponible():
+            return _error("el corpus aun no esta cargado en este despliegue")
 
         lista = [f.strip().upper() for f in fenomenos.split(",") if f.strip()]
         datos = aggregates.agregar(
@@ -170,6 +176,9 @@ def view(spec: dict[str, Any]) -> JSONResponse:
     except ValidationError as exc:
         log.warning("view_spec invalido: %s", exc.errors()[:2])
         return _error("la vista no es valida", detalle=[e.get("msg", "") for e in exc.errors()[:3]])
+
+    if not aggregates.disponible():
+        return _error("el corpus aun no esta cargado en este despliegue")
 
     # Una vista temporal agrupa por ano aunque el agente no lo diga: es la unica
     # granularidad que el corpus sostiene y evita una serie de una sola barra.

@@ -186,3 +186,32 @@ def test_la_ventana_no_toca_un_historial_corto():
 
 def test_la_ventana_tolera_un_historial_vacio():
     assert ventana_historial([], turnos=6) == []
+
+
+# -- alcance por conversacion ------------------------------------------------
+
+
+def test_un_primer_turno_acierta_contra_cualquier_sesion(sin_encoder):
+    """El evaluador manda preguntas independientes, cada una con su sesion: sin
+    aciertos entre sesiones el cache no serviria de nada."""
+    c = CacheSemantico()
+    c.guardar("que dice el corpus", _respuesta(), sesion="sesion-A")
+    assert c.buscar("que dice el corpus", sesion="sesion-B") is not None
+
+
+def test_un_turno_de_seguimiento_solo_acierta_en_su_conversacion(sin_encoder):
+    """'y en 2023?' significa algo distinto en cada conversacion. Sin esta
+    regla el cache devolveria con total confianza la respuesta de otra."""
+    c = CacheSemantico()
+    c.guardar("y en 2023", _respuesta("respuesta de A"), sesion="sesion-A")
+    c.guardar("pregunta inicial", _respuesta(), sesion="sesion-B")  # B ya tiene historial
+
+    assert c.buscar("y en 2023", sesion="sesion-A") is not None
+    assert c.buscar("y en 2023", sesion="sesion-B") is None
+
+
+def test_el_registro_de_turnos_tiene_tope(sin_encoder):
+    c = CacheSemantico(max_entradas=3)
+    for i in range(6):
+        c.guardar(f"p{i}", _respuesta(), sesion=f"s{i}")
+    assert len(c._turnos) == 3

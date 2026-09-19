@@ -98,6 +98,31 @@ class Resultado:
 Ejecutor = Callable[[Paso], Resultado]
 EJECUTORES: dict[str, Ejecutor] = {}
 
+#: Nombre con el que la agent card llama a cada delegacion, y los argumentos que
+#: declara. El orquestador delega emitiendo un paso del plan, no llamando a una
+#: tool; sin anotarlo aqui, `tools_called` nunca mostraria su funcion principal
+#: y la card prometeria algo que la traza no demuestra.
+DELEGACIONES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "agente_documental": ("delegar_documental", ("consulta", "fenomeno")),
+    "agente_visualizador": ("delegar_visualizacion", ("instruccion",)),
+    "agente_analitico": ("delegar_analitico", ("consulta", "group_by")),
+}
+
+
+def _anotar_delegacion(paso: Paso) -> None:
+    """Deja la delegacion en la traza, con los argumentos que declara la card."""
+    entrada = DELEGACIONES.get(paso.agente)
+    if entrada is None:
+        return
+    nombre, campos = entrada
+    valores = {
+        "consulta": paso.consulta,
+        "instruccion": paso.consulta,
+        "fenomeno": paso.fenomeno or "",
+        "group_by": paso.group_by or "",
+    }
+    turnlog.record_tool_call(nombre, {c: valores[c] for c in campos}, f"delegado a {paso.agente}")
+
 
 def registrar(agente: str) -> Callable[[Ejecutor], Ejecutor]:
     """Registra un ejecutor bajo un id de la agent card."""
@@ -119,8 +144,11 @@ def ejecutar(paso: Paso) -> Resultado:
     with tracing.span("tool", f"ejecutar.{paso.agente}", input=paso.consulta[:300]) as sp:
         try:
             # Se anota ANTES de correr: un agente que fallo tambien intervino, y
-            # ocultarlo haria ilegible la trayectoria que evalua ADL.
+            # ocultarlo haria ilegible la trayectoria que evalua ADL. La
+            # delegacion va primero para que la trayectoria se lea en orden:
+            # delegar_documental -> buscar_corpus.
             turnlog.record_agent(paso.agente)
+            _anotar_delegacion(paso)
             resultado = fn(paso)
             sp.set_output(f"suficiente={resultado.suficiente} evidencia={len(resultado.evidencia)}")
             return resultado

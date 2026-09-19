@@ -32,7 +32,7 @@ from typing import Any, Literal
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langgraph.graph import END, START, StateGraph
 
-from src.agents import executors, orchestrator, verifier
+from src.agents import budget, executors, orchestrator, verifier
 from src.agents.memory import VENTANA_TURNOS
 from src.agents.plan import MAX_REPLANES, Paso, Plan
 from src.agents.state import TURNO_LIMPIO, AgentState
@@ -185,7 +185,13 @@ def componer(state: AgentState) -> dict[str, Any]:
     # tras una replanificacion la evidencia definitiva solo se conoce ahora.
     documental = [e for e in evidencia if not str(e.get("chunk_id", "")).startswith("agregado:")]
     if documental:
-        findings[executors.AGENTE_DOCUMENTAL] = executors.redactar(state["question"], documental)
+        if budget.alcanza():
+            findings[executors.AGENTE_DOCUMENTAL] = executors.redactar(
+                state["question"], documental
+            )
+        else:
+            log.warning("presupuesto de tiempo agotado; se entrega la evidencia sin redactar")
+            findings[executors.AGENTE_DOCUMENTAL] = ""
 
     partes: list[str] = []
     for agente in (executors.AGENTE_DOCUMENTAL, executors.AGENTE_ANALITICO):
@@ -228,6 +234,11 @@ def verificar(state: AgentState) -> dict[str, Any]:
     esa comparacion falla, que es el unico caso en que hay algo que arreglar.
     """
     original = state.get("answer") or ""
+    if not budget.alcanza():
+        # La correccion cuesta una llamada. Sin tiempo, la respuesta sale tal
+        # cual: el verificador mejora una respuesta, no la sustituye.
+        log.info("presupuesto de tiempo agotado; se omite la verificacion")
+        return {}
     corregida = verifier.verificar(original, state.get("evidence") or [])
     if corregida == original:
         return {}
@@ -249,6 +260,12 @@ def tras_ejecutar(state: AgentState) -> Literal["planificar", "componer"]:
     dando vueltas gastando presupuesto sin lanzar ningun error.
     """
     if state.get("suficiente"):
+        return "componer"
+    if not budget.alcanza(budget.MARGEN_REDACCION_S):
+        # Replanificar son dos llamadas mas (plan y ejecucion) y el turno ya va
+        # tarde. Se prefiere redactar con lo que hay: el evaluador puntua una
+        # respuesta imperfecta, no una que no llego.
+        log.info("sin presupuesto de tiempo para replanificar; se redacta con lo que hay")
         return "componer"
     if state.get("replans", 0) >= MAX_REPLANES:
         log.info(
