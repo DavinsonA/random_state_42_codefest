@@ -201,13 +201,76 @@ documento, no una decisión del equipo.
 
 | ID | Decisión | Fecha | Quién decidió | Notas |
 |---|---|---|---|---|
-| D1 | | | | |
-| D2 | | | | |
-| D3 | | | | |
-| D4 | | | | |
-| D5 | | | | |
-| D6 | | | | |
-| D7 | | | | |
+| D1 | **A** — un recurso con los tres dominios | 2026-09-19 | equipo | 8 GB de servidor; 3,8 GB medidos de pico con 4 peticiones concurrentes |
+| D2 | **A modificada** — descarga al arrancar, en **segundo plano** | 2026-09-19 | equipo | Ver §6.1: el orden de arranque que este documento exigía ya no aplica |
+| D3 | **B** — volumen `HF_HOME`, el encoder se baja al primer arranque | 2026-09-19 | verificado en el despliegue | El riesgo de D3 era "si el servidor no llega a Hugging Face". **Llega**: `encoder_listo: true` en el primer despliegue real |
+| D4 | Pendiente | — | — | Los 16 paquetes `nvidia-*` + `triton` siguen en la imagen (~2,5 GB). `torch` **no** se puede quitar: `sentence-transformers` lo necesita |
+| D5 | `main` | 2026-09-19 | equipo | Con *Auto Deploy* **apagado**; el congelamiento se hace por disciplina, no por rama |
+| D6 | `docker-compose.yml` se queda, solo para desarrollo local | 2026-09-19 | equipo | Coolify construye desde el `Dockerfile`; el compose no participa del despliegue |
+| D7 | 08:00 del sábado | 2026-09-19 | `RETO.md` | Entre 08:00 y 12:30 no se toca el endpoint |
+
+### 6.1 Por qué D2 cambió de forma, y por qué el orden de arranque ya no aplica
+
+La versión original de D2 en este documento decía que el script debía **terminar** de dejar
+el índice antes de iniciar `uvicorn`, porque la tabla de agregación cacheaba el fallo y
+quedaba vacía hasta reiniciar (problema #9). **Ese problema está corregido**: la tabla ya no
+cachea el fallo y recoge el índice en la siguiente petición.
+
+Eso permite invertir la prioridad, y la inversión importa. Si el arranque se bloquea durante
+1,6 GB de descarga, el contenedor no responde durante minutos justo en la ventana en que
+Traefik decide si enrutarlo; los tres dominios contestan `503 no available server` y la
+ventana de evaluación se pierde entera. Con la descarga en segundo plano el servicio responde
+desde el primer segundo, `/health` declara `index_loaded: false` mientras tanto —que es la
+verdad, no un disfraz— y el índice se incorpora solo.
+
+**Esto hay que verificarlo en cada despliegue, no darlo por hecho**: cuando `/health` pase a
+`index_loaded: true`, comprobar que `GET /api/aggregate?group_by=fenomeno` devuelve `filas`
+no vacías. Si vinieran vacías, el problema #9 habría vuelto y la solución es reiniciar el
+contenedor una vez terminada la descarga.
+
+### 6.2 Procedimiento real del despliegue (2026-09-19)
+
+Se hizo **por la API de Coolify** (v4.3.23), no por el panel. Equivale al Anexo A de la
+Especificación, con dos diferencias que conviene conocer si alguien revisa la UI:
+
+1. **La llave SSH se generó fuera de Coolify** (`ssh-keygen`) y se subió por
+   `POST /api/v1/security/keys`. El Anexo A.1 la genera desde el panel; el resultado es el
+   mismo par ED25519 registrado como *Deploy Key* de solo lectura en GitHub.
+2. **Los bind mounts NO están en la sección *Storages*** sino en *Advanced → Custom Docker
+   Options*. La API de esta versión solo acepta volúmenes con nombre (`type: persistent`), y
+   hacían falta bind mounts a rutas del host. La línea es:
+
+   ```
+   -v /data/arpia/corpus:/app/data -v /data/arpia/state:/app/state -v /data/arpia/hf:/app/.cache/huggingface
+   ```
+
+   `/app/data` **no** va en solo lectura: el entrypoint escribe ahí el índice que descarga.
+
+Identificadores del recurso, por si hay que operarlo por API:
+
+| Elemento | UUID |
+|---|---|
+| Proyecto `arpia` | `cd9ktfnmo03k0ndfk5kh5trr` |
+| Aplicación `arpia` | `ubkeuntj3e9vvtzdqixfvyqt` |
+| Servidor `localhost` | `1gsc6lsc1zmrkjxspggiwszh` |
+| Deploy key | `dfmc6dxlkvkcb9ihungxsago` |
+
+### 6.3 De dónde sale el índice
+
+`DATA_FILES` apunta a la entrega de la Etapa 1 del equipo en Google Drive, que además del
+índice contiene el encoder `bge-m3` completo (`modelos/bge_m3/`) por si Hugging Face fallara:
+
+```
+index.faiss     1gI0NOmoXAQhSrqfOucPGXcreZ40pAtxJ
+metadata.jsonl  1d_ENaXJGDbDgw3ldlsTq1E0Ha1eLnFa2
+manifest.json   18e6_O6kE7hENMa00kqyfNajVKjI9AI4l
+```
+
+Formato de la variable: `nombre=url` separados por espacios. Se descargan con `curl` sobre
+`drive.usercontent.google.com/download?export=download&confirm=t&id=<id>`, que sirve archivos
+grandes sin autenticación y admite rangos (por eso el entrypoint puede reanudar). El
+entrypoint descarta cualquier `.faiss` o `.jsonl` de menos de 100 MB: cuando Drive excede
+cuota responde `200` con una página HTML, y sin esa comprobación el fallo sería silencioso.
 
 ---
 
