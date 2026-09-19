@@ -1,12 +1,8 @@
-"""Pruebas de contrato de la API, en modo stub.
+"""Pruebas del contrato de la API (`src/api/contracts.py`).
 
-Protegen dos invariantes de `docs/architecture.md`: el jurado consume la
-aplicacion desplegada, no el repositorio, asi que el contrato HTTP debe
-cumplirse siempre; y `/analyze` nunca puede devolver 500, porque un fallo
-interno debe degradarse, no tumbar la respuesta.
-
-Corren en modo stub a proposito: no requieren indice, credenciales ni
-gateway, igual que el despliegue inicial en Coolify.
+El evaluador de ADL consume la aplicacion desplegada, no el repositorio: el
+formato de `POST /chat` (especificacion §2.4) debe cumplirse siempre. Corren
+en modo stub para no depender de indice, credenciales ni Bedrock.
 """
 
 from __future__ import annotations
@@ -17,7 +13,16 @@ os.environ.setdefault("ARPIA_MODE", "stub")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 
+from src.api.contracts import (  # noqa: E402
+    ChatRequest,
+    ChatResponse,
+    Evaluacion,
+    Metadata,
+    TokenCount,
+    TokensPorAgente,
+)
 from src.api.main import app  # noqa: E402
 
 client = TestClient(app)
@@ -34,79 +39,99 @@ def _stub_mode(monkeypatch):
     config.get_settings.cache_clear()
 
 
+# -- entrada de /chat --------------------------------------------------------
+
+
+@pytest.mark.parametrize("clave", ["texto", "pregunta", "query", "input", "message", "question"])
+def test_chat_request_acepta_alias_de_la_pregunta(clave):
+    assert ChatRequest.model_validate({clave: "hola"}).texto == "hola"
+
+
+@pytest.mark.parametrize("clave", ["sesion_id", "session_id", "thread_id"])
+def test_chat_request_acepta_alias_de_sesion(clave):
+    req = ChatRequest.model_validate({"texto": "hola", clave: "abc12345"})
+    assert req.sesion_id == "abc12345"
+
+
+def test_chat_request_sesion_es_opcional_e_ignora_campos_extra():
+    req = ChatRequest.model_validate({"texto": "hola", "campo_desconocido": 1})
+    assert req.sesion_id is None
+
+
+def test_chat_request_rechaza_texto_vacio():
+    with pytest.raises(ValidationError):
+        ChatRequest.model_validate({"texto": ""})
+
+
+# -- salida de /chat (formato ADL §2.4) --------------------------------------
+
+
+def _metadata(**kw) -> Metadata:
+    base = dict(
+        num_interacciones=2,
+        agentes_invocados=["orquestador", "agente_qa"],
+        tokens=TokenCount(input=100, output=40, total=140),
+        tokens_por_agente=[
+            TokensPorAgente(
+                agente="orquestador", modelo="gpt-oss-120b", input=60, output=10, total=70
+            ),
+            TokensPorAgente(
+                agente="agente_qa", modelo="llama-3.3-70b", input=40, output=30, total=70
+            ),
+        ],
+        latencia_ms=1200,
+    )
+    base.update(kw)
+    return Metadata(**base)
+
+
+def test_chat_response_tiene_los_tres_bloques_de_adl():
+    resp = ChatResponse(
+        respuesta="x",
+        evaluacion=Evaluacion(input="q", actual_output="x"),
+        metadata=_metadata(),
+    )
+    body = resp.model_dump()
+    assert body.keys() == {"respuesta", "evaluacion", "metadata"}
+    assert body["evaluacion"].keys() == {
+        "input",
+        "actual_output",
+        "retrieval_context",
+        "tools_called",
+    }
+    assert body["metadata"].keys() == {
+        "num_interacciones",
+        "agentes_invocados",
+        "tokens",
+        "tokens_por_agente",
+        "latencia_ms",
+        "estado",
+    }
+    assert body["metadata"]["estado"] == "ok"
+
+
+def test_tokens_total_debe_sumar_todos_los_agentes():
+    """Requisito obligatorio de ADL: no basta con contar el orquestador."""
+    with pytest.raises(ValidationError):
+        _metadata(tokens=TokenCount(input=60, output=10, total=70))
+
+
+# -- operacion ---------------------------------------------------------------
+
+
 def test_health_esquema_y_ok_en_stub():
     resp = client.get("/health")
     assert resp.status_code == 200
     body = resp.json()
     assert body["mode"] == "stub"
-    assert body["status"] in ("ok", "degraded")
+    assert body["status"] in ("ok", "degraded", "down")
     assert isinstance(body["tools_registered"], list)
     assert isinstance(body["max_iterations"], int)
-
-
-def test_analyze_esquema_valido_en_stub():
-    resp = client.post("/analyze", json={"query": "satelites en orbita baja", "top_k": 5})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["mode"] == "stub"
-    assert body["query"] == "satelites en orbita baja"
-    assert isinstance(body["answer"], str) and body["answer"]
-    assert isinstance(body["evidence"], list) and body["evidence"]
-    for ev in body["evidence"]:
-        assert {"rank", "doc_id", "chunk_id", "text", "score"} <= ev.keys()
     assert isinstance(body["warnings"], list)
-    assert isinstance(body["tokens_used"], dict)
-    assert {"input_tokens", "output_tokens", "total_tokens", "calls"} <= body["tokens_used"].keys()
-    assert isinstance(body["elapsed_ms"], (int, float))
-
-
-def test_analyze_nunca_devuelve_500_sin_gateway():
-    """Ni siquiera en modo live, sin LLM_BASE_URL/LLM_API_KEY configurados,
-    /analyze debe degradar en vez de devolver un error de servidor."""
-    import src.config as config
-
-    os.environ["ARPIA_MODE"] = "live"
-    os.environ.pop("LLM_BASE_URL", None)
-    os.environ.pop("LLM_API_KEY", None)
-    config.get_settings.cache_clear()
-    try:
-        resp = client.post("/analyze", json={"query": "sin gateway configurado"})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["mode"] == "live"
-        assert any("LLM_BASE_URL" in w or "gateway" in w.lower() for w in body["warnings"])
-    finally:
-        os.environ["ARPIA_MODE"] = "stub"
-        config.get_settings.cache_clear()
-
-
-def test_retrieve_esquema_valido_en_stub():
-    resp = client.post("/retrieve", json={"query": "zona costera", "top_k": 4})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["mode"] == "stub"
-    assert body["query"] == "zona costera"
-    assert isinstance(body["documents"], list)
-    assert isinstance(body["fragments"], list) and body["fragments"]
-    for frag in body["fragments"]:
-        assert {"rank", "chunk_id", "doc_id", "text", "score"} <= frag.keys()
 
 
 def test_usage_esquema_valido():
     resp = client.get("/usage")
     assert resp.status_code == 200
     body = resp.json()
-    assert {"requests", "llm_calls", "input_tokens", "output_tokens", "trace_count"} <= body.keys()
-
-
-def test_analyze_incluye_traza_con_spans_y_trace_id():
-    resp = client.post("/analyze", json={"query": "cobertura radar"})
-    assert resp.status_code == 200
-    trace = resp.json()["trace"]
-    assert trace["trace_id"]
-    assert isinstance(trace["spans"], list) and len(trace["spans"]) >= 1
-    span = trace["spans"][0]
-    assert {"span_id", "parent_id", "type", "name", "input", "output", "start_ms", "end_ms"} <= (
-        span.keys()
-    )
-    assert span["type"] in ("llm", "tool", "retrieval")
+    assert {"requests", "llm_calls", "input_tokens", "output_tokens", "trace_count"} == body.keys()
