@@ -16,7 +16,7 @@
 // No hay mapa: el corpus no trae ubicacion (GET /api/geo lo declara), y un
 // mapa geocodificado a ojo seria una afirmacion falsa con autoridad visual.
 
-import { enviarChat, obtenerGeo, obtenerSalud } from "./api.js";
+import { enviarChat, obtenerSalud } from "./api.js";
 import {
     FENOMENOS,
     NOMBRE_CHART,
@@ -308,53 +308,14 @@ function dibujarRelaciones(cont, { nodos }) {
 // la version desplegada. No se aceptan datos simulados o inventados en el
 // tablero final". El prototipo abria con series, marcadores de mapa y nodos de
 // ejemplo; se cambiaron por lo unico defendible: las dos vistas que el corpus
-// si sostiene, cargadas de verdad, y una declaracion explicita en las dos que
-// no.
-//
-// Un panel que dice "no hay este dato y por que" es informacion. Un panel con
-// tres puntos sobre Colombia que nadie extrajo del corpus es una afirmacion
-// falsa con autoridad visual, y es lo primero que se cae si el jurado pregunta
-// de donde salio.
+// si sostiene, cargadas de verdad. Igual que en `main`, el tablero abre solo
+// con esas dos: sin paneles de mapa ni de relaciones, que el corpus no tiene.
 
-/** El mapa no existe, y el backend explica por que. */
-async function vistaMapaSinDato() {
-    let texto;
-    try {
-        const g = await obtenerGeo();
-        // El backend manda dos frases sin puntuacion final ni mayuscula inicial.
-        const frases = [g.motivo, g.alternativa]
-            .filter(Boolean)
-            .map((f) => f.trim().replace(/[.\s]+$/, ""))
-            .map((f) => f[0].toUpperCase() + f.slice(1));
-        texto = frases.length ? `${frases.join(". ")}.` : t("tablero.mapa.sinDatos");
-    } catch {
-        texto = t("tablero.mapa.sinDatos");
-    }
-    return {
-        titulo: t("tablero.mapa"),
-        origen: "sin_datos",
-        nota: "",
-        dibujar: mensaje(texto),
-    };
-}
-
-/** Las relaciones necesitan el grafo de conocimiento, que era opcional en la
- *  Etapa 1 y no forma parte de esta base. */
-function vistaRelacionesSinDato() {
-    return {
-        titulo: t("tablero.relaciones"),
-        origen: "sin_datos",
-        nota: "",
-        dibujar: mensaje(t("tablero.relaciones.sinDatos")),
-    };
-}
-
-/** Lo que se ve al abrir el tablero: dos vistas reales y dos declaraciones. */
+/** Lo que se ve al abrir el tablero: las dos vistas reales del corpus. */
 async function vistasIniciales() {
-    const conDatos = await Promise.all(
+    return Promise.all(
         [VISTA_TIEMPO_INICIAL, VISTA_INICIAL].map((spec) => vistaDelAgente(spec, { inicial: true })),
     );
-    return [...conDatos, await vistaMapaSinDato(), vistaRelacionesSinDato()];
 }
 
 // =============================================================================
