@@ -25,6 +25,29 @@ SOBRE_RECUPERAR = 40
 
 _index: VectorIndex | None = None
 
+#: Largo del texto citado que viaja en la respuesta. El fragmento completo se
+#: abre con `/api/evidence/{chunk_id}`.
+FRAGMENTO_CHARS = 240
+
+
+def _cita(doc_id: str, chunk_id: str, fila: dict, texto: str) -> dict:
+    """Una cita con todo lo que el tooltip de una referencia necesita.
+
+    Unico punto donde se arma: `recuperar`, `citar_documentos` y el respaldo de
+    `/chat` la usan, para que una cita salga igual venga de donde venga. Los
+    campos que la fila no tiene salen como None y el contrato los admite.
+    """
+    return {
+        "doc_id": doc_id,
+        "chunk_id": chunk_id,
+        "fuente": fila.get("organizacion") or fila.get("fuente"),
+        "fragmento": texto[:FRAGMENTO_CHARS],
+        "formato": fila.get("formato"),
+        "posicion": fila.get("posicion"),
+        "total_fragmentos": fila.get("total_fragmentos"),
+        "anio": fila.get("anio"),
+    }
+
 
 def _get_index() -> VectorIndex:
     global _index
@@ -82,17 +105,7 @@ def recuperar(
     # Lo que ADL llama `retrieval_context`: el texto que se le entrego al modelo,
     # con su procedencia para que las citas tengan respaldo.
     turnlog.add_context([f"({h.citation()}) {h.text}" for h in hits])
-    turnlog.add_citations(
-        [
-            {
-                "doc_id": h.doc_id,
-                "chunk_id": h.chunk_id,
-                "fuente": h.metadata.get("organizacion") or h.metadata.get("fuente"),
-                "fragmento": h.text[:240],
-            }
-            for h in hits
-        ]
-    )
+    turnlog.add_citations([_cita(h.doc_id, h.chunk_id, h.metadata, h.text) for h in hits])
     return hits
 
 
@@ -131,12 +144,7 @@ def citar_documentos(doc_ids: list[str]) -> list[dict]:
         return []
 
     citas = [
-        {
-            "doc_id": d,
-            "chunk_id": filas[d]["chunk_id"],
-            "fuente": filas[d].get("organizacion") or filas[d].get("fuente"),
-            "fragmento": str(filas[d].get("texto", ""))[:240],
-        }
+        _cita(d, filas[d]["chunk_id"], filas[d], str(filas[d].get("texto", "")))
         for d in doc_ids
         if d in filas and filas[d].get("chunk_id")
     ]
