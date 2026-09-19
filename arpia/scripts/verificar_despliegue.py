@@ -17,7 +17,6 @@ para poder repetir la verificacion las veces que haga falta sin pagarla.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from typing import Any
 
@@ -31,9 +30,12 @@ OK, FALLO, AVISO = "ok", "FALLO", "aviso"
 class Verificador:
     """Acumula resultados. No lanza: una comprobacion rota no detiene las demas."""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, verificar_tls: bool = True) -> None:
         self.url = url.rstrip("/")
-        self.cliente = httpx.Client(follow_redirects=True, timeout=TIMEOUT_S)
+        self.verificar_tls = verificar_tls
+        self.cliente = httpx.Client(
+            follow_redirects=True, timeout=TIMEOUT_S, verify=verificar_tls
+        )
         self.filas: list[tuple[str, str, str]] = []
 
     def anotar(self, nombre: str, estado: str, detalle: str = "") -> None:
@@ -93,6 +95,41 @@ class Verificador:
         )
         return cuerpo
 
+    def certificado(self) -> None:
+        """Lo primero que toca el cliente de ADL, y lo unico que no perdona.
+
+        Un certificado que no cubre el dominio hace fallar a cualquier cliente
+        HTTPS con verificacion —que es la de por defecto en httpx y requests—
+        antes de mandar un solo byte de la pregunta.
+        """
+        import socket
+        import ssl
+        from urllib.parse import urlparse
+
+        host = urlparse(self.url).hostname or ""
+        if urlparse(self.url).scheme != "https":
+            self.anotar("certificado TLS", AVISO, "la URL no es https")
+            return
+        try:
+            ctx = ssl.create_default_context()
+            with (
+                socket.create_connection((host, 443), timeout=15) as sock,
+                ctx.wrap_socket(sock, server_hostname=host) as tls,
+            ):
+                cert = tls.getpeercert()
+            emisor = dict(x[0] for x in cert.get("issuer", ()))
+            self.anotar(
+                "certificado TLS", OK, f"valido, emitido por {emisor.get('organizationName', '?')}"
+            )
+        except ssl.SSLCertVerificationError as exc:
+            self.anotar(
+                "certificado TLS",
+                FALLO,
+                f"{exc.verify_message or exc}  <-- un cliente con verificacion no puede conectar",
+            )
+        except OSError as exc:
+            self.anotar("certificado TLS", FALLO, str(exc))
+
     def agent_card(self) -> None:
         codigo, cuerpo = self.get("/agent-card")
         if codigo != 200 or not isinstance(cuerpo, dict):
@@ -128,18 +165,36 @@ class Verificador:
         self.anotar("GET /api/aggregate", OK, f"{len(filas)} filas: {filas[:3]}")
 
     def dominios(self) -> None:
-        """El mismo contenedor sirve tres dominios segun la cabecera `Host`."""
-        for host, espera in (
-            ("frontagent.equipo.codefest2026.augusta.avaldigitallabs.com", "chat"),
-            ("dashboard.equipo.codefest2026.augusta.avaldigitallabs.com", "tablero"),
-        ):
-            codigo, cuerpo = self.get("/", host=host)
-            texto = cuerpo if isinstance(cuerpo, str) else json.dumps(cuerpo)
+        """Los otros dos dominios del mismo contenedor.
+
+        Se piden por su URL completa, NO mandando una cabecera `Host` sobre la
+        conexion de `agent.`: con TLS el nombre viaja tambien en el SNI, y un
+        SNI que no concuerda con el `Host` hace que Traefik no encuentre router
+        y conteste 503. Ese 503 seria un fallo de la prueba, no del despliegue.
+        """
+        from urllib.parse import urlparse
+
+        partes = urlparse(self.url)
+        anfitrion = partes.hostname or ""
+        if "." not in anfitrion:
+            self.anotar("otros dominios", AVISO, "no se puede derivar desde " + self.url)
+            return
+        cola = anfitrion.split(".", 1)[1]
+
+        for sub, espera in (("frontagent", "chat"), ("dashboard", "tablero")):
+            destino = f"{partes.scheme}://{sub}.{cola}/"
+            try:
+                r = self.cliente.get(destino)
+                codigo, texto = r.status_code, r.text
+            except Exception as exc:  # noqa: BLE001
+                self.anotar(f"dominio {sub}.", FALLO, f"{type(exc).__name__}: {exc}")
+                continue
             falta = "no está incluida en esta imagen" in texto or "no esta incluida" in texto
             self.anotar(
-                f"Host {host.split('.')[0]}.",
+                f"dominio {sub}.",
                 FALLO if (codigo != 200 or falta) else OK,
-                f"codigo {codigo}" + (f", falta {espera}.html" if falta else f", {len(texto)} bytes"),
+                f"codigo {codigo}"
+                + (f", falta {espera}.html" if falta else f", {len(texto)} bytes"),
             )
 
     def evidencia(self) -> None:
@@ -290,17 +345,26 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--url", default="http://127.0.0.1:8000")
     p.add_argument(
+        "--sin-verificar-tls",
+        action="store_true",
+        help=(
+            "no valida el certificado. Para diagnosticar mientras Traefik sirve su "
+            "certificado por defecto; NO refleja lo que vera el cliente de ADL"
+        ),
+    )
+    p.add_argument(
         "--con-chat",
         action="store_true",
         help="lanza UNA pregunta real al gateway (2 llamadas). Lo demas es gratis.",
     )
     args = p.parse_args()
 
-    v = Verificador(args.url)
+    v = Verificador(args.url, verificar_tls=not args.sin_verificar_tls)
     if not v.salud():
         for linea in diagnosticar(args.url):
             print(linea, file=sys.stderr)
         return 2
+    v.certificado()
     v.agent_card()
     v.agregacion()
     v.dominios()
