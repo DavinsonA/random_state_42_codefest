@@ -126,11 +126,12 @@ def test_un_reparto_plano_no_inventa_hallazgos(monkeypatch):
     assert r["hallazgos"] == [] and r["complementarias"] == []
 
 
-def test_las_complementarias_son_view_specs_validos_y_como_mucho_dos():
+def test_las_complementarias_son_view_specs_validos_y_no_pasan_del_tope():
+    from src.agents.compositor import MAX_COMPLEMENTARIAS
     from src.api.contracts import ViewSpec
 
     r = _view(chart="bar", group_by="organizacion", fenomenos=["F3"])
-    assert 1 <= len(r["complementarias"]) <= 2
+    assert 1 <= len(r["complementarias"]) <= MAX_COMPLEMENTARIAS
     for c in r["complementarias"]:
         ViewSpec.model_validate(c)
     assert r["complementarias"][0]["chart"] == "donut"

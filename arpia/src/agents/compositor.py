@@ -35,7 +35,7 @@ from src.api.contracts import ViewSpec
 
 #: Vistas de apoyo por respuesta, ademas de la principal. Con mas, el tablero
 #: deja de tener una lectura y pasa a ser una pared de graficas.
-MAX_COMPLEMENTARIAS = 2
+MAX_COMPLEMENTARIAS = 3
 
 #: Id del agente en la traza y en `agentes_invocados`. Cuesta cero tokens, y
 #: un agente que trabaja y no aparece es credito perdido.
@@ -101,6 +101,56 @@ def _composicion(principal: ViewSpec, ordenadas: list[Fila], total: int) -> View
     )
 
 
+def _cruce_temporal(principal: ViewSpec, ordenadas: list[Fila]) -> ViewSpec | None:
+    """La misma pregunta, a lo largo del tiempo.
+
+    `serie_por` cruza dos dimensiones en una vista: aqui, el eje del año contra
+    la dimension que el usuario pidio. Responde "y esto como se reparte por
+    año", que es la pregunta que sigue a casi cualquier comparacion.
+
+    El modelo no ve `serie_por` —se midio que con el campo visible confundia el
+    fenomeno filtrado— pero el compositor si puede usarlo: es determinista, y
+    una dimension elegida por aritmetica no se equivoca de fenomeno.
+
+    Solo cuando hay varias categorias que seguir: una serie de una sola linea
+    es una serie simple con pasos de mas.
+    """
+    if principal.chart == "timeline" or principal.group_by in (None, "anio"):
+        return None
+    if len(ordenadas) < 2:
+        return None
+    return ViewSpec(
+        chart="timeline",
+        metrica=principal.metrica,
+        fenomenos=list(principal.fenomenos),
+        group_by="anio",
+        serie_por=principal.group_by,
+        titulo=f"Evolución anual por {NOMBRE_DIMENSION.get(principal.group_by, principal.group_by)}",
+        nota=AVISO_COBERTURA,
+    )
+
+
+def _composicion_interna(principal: ViewSpec, ordenadas: list[Fila]) -> ViewSpec | None:
+    """De que formato es el material de cada categoria.
+
+    Distingue una fuente que publica informes narrativos de una que publica
+    datos estructurados, y esa diferencia pesa al ponderar evidencia. Se ofrece
+    solo cuando hay suficientes categorias para que la comparacion se lea.
+    """
+    if principal.group_by in (None, "formato") or principal.chart == "stacked_bar":
+        return None
+    if len(ordenadas) < MIN_CATEGORIAS:
+        return None
+    return ViewSpec(
+        chart="stacked_bar",
+        metrica=principal.metrica,
+        fenomenos=list(principal.fenomenos),
+        group_by=principal.group_by,
+        serie_por="formato",
+        titulo=f"Formato del material por {NOMBRE_DIMENSION.get(principal.group_by, principal.group_by)}",
+    )
+
+
 def componer(principal: ViewSpec, filas: list[Fila]) -> list[ViewSpec]:
     """La vista del usuario y, si los datos lo justifican, las que la explican.
 
@@ -118,10 +168,26 @@ def componer(principal: ViewSpec, filas: list[Fila]) -> list[ViewSpec]:
         return [principal]
 
     ordenadas = sorted(utiles, key=lambda f: -f.valor)
-    candidatas = [
+    # En orden de valor: primero lo que la forma de los datos hace evidente,
+    # luego los angulos que la explican. El tope corta por abajo.
+    destacados = [
         _detalle_del_dominante(principal, ordenadas, total),
         _composicion(principal, ordenadas, total),
     ]
+
+    # **Los angulos adicionales solo aparecen si el reparto dice algo.** Un
+    # cruce por ano o por formato es informativo cuando hay una asimetria que
+    # explicar; sobre un reparto plano es una grafica mas que no responde
+    # ninguna pregunta, y un tablero con graficas que nadie pidio se lee peor
+    # que uno escueto. La señal es la misma que usan los hallazgos: si ninguna
+    # regla de concentracion se disparo, no hay nada que desarrollar.
+    angulos = (
+        [_cruce_temporal(principal, ordenadas), _composicion_interna(principal, ordenadas)]
+        if any(destacados)
+        else []
+    )
+
+    candidatas = [*destacados, *angulos]
 
     vistas = [principal]
     vistos = {_clave(principal)}

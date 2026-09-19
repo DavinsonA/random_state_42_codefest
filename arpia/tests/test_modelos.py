@@ -92,7 +92,7 @@ def test_un_alias_malformado_no_tumba_el_arranque(monkeypatch):
             "agente_documental",
             "meta.llama3-3-70b-instruct",
         ),
-        (lambda: executors._llm("agente_visualizador"), "agente_visualizador", "gpt-oss-20b"),
+        (lambda: executors._llm("agente_visualizador"), "agente_visualizador", "gpt-oss-120b"),
         (lambda: orchestrator._llm(), "orquestador", "gpt-oss-120b"),
     ],
 )

@@ -29,6 +29,7 @@ import {
     vistasDesdeHash,
 } from "./viewspec.js";
 import { conIdioma, mensajeError, montarSelector, t } from "./i18n.js";
+import { descargarInforme } from "./informe.js";
 import { abrirVisor, enlazarReferencias } from "./referencias.js";
 import { conTransicion, paginaLista, suavizarEnlace } from "./transiciones.js";
 
@@ -702,6 +703,15 @@ function mostrarRespuesta(datos) {
         caja.append(lista);
     }
 
+    // El informe se arma con lo que ya esta en pantalla, asi que el boton solo
+    // aparece cuando hay una respuesta que descargar.
+    const boton = $("descargar-informe");
+    if (boton) {
+        boton.hidden = false;
+        boton.onclick = () =>
+            descargarInforme(estado.ultimaPregunta || "", datos, { vistas: estado.specs || [] });
+    }
+
     // Las citas del texto se vuelven interactivas: al pulsarlas abren el
     // fragmento exacto que las sostiene. Es la trazabilidad que exige RETO.md
     // —todo dato mostrado se rastrea hasta su doc_id y chunk_id— puesta al
@@ -731,6 +741,9 @@ async function preguntar(texto) {
     const limpio = String(texto || "").trim();
     if (!limpio || estado.ocupado) return;
     estado.ocupado = true;
+    // La guarda el informe: sin la pregunta, el archivo descargado no dice a
+    // que responde.
+    estado.ultimaPregunta = limpio;
     $("enviar").disabled = true;
     $("pensando").classList.add("activo");
     $("respuesta").replaceChildren(el("p", null, t("tablero.ia.procesando")));

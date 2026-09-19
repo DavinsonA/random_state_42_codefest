@@ -220,6 +220,17 @@ class Citation(BaseModel):
     posicion: int | None = Field(None, description="Posicion del fragmento en su documento (0).")
     total_fragmentos: int | None = Field(None, description="Fragmentos del documento.")
     anio: int | None = Field(None, description="Ano, solo si el documento lo declara.")
+    organizacion: str | None = Field(
+        None,
+        description=(
+            "Quien publica, en su forma legible. `fuente` trae la ruta del archivo "
+            "cuando la organizacion no se conoce; este campo, solo el nombre."
+        ),
+    )
+    fenomeno: str | None = Field(None, description="F1, F2 o F3.")
+    fenomeno_nombre: str | None = Field(
+        None, description="El fenomeno en la forma en que se nombra al usuario."
+    )
 
 
 class ViewSpec(BaseModel):
@@ -291,12 +302,28 @@ class ViewSpec(BaseModel):
 
     @model_validator(mode="after")
     def _serie_por_coherente(self) -> ViewSpec:
-        """Una segunda dimension que no se puede pintar se quita, no invalida la vista.
+        """Ajusta la vista a las reglas de su propio componente. Nunca la invalida.
 
-        Medido con el modelo real: una vista degradada (sin cruce) es util; una
-        vista descartada por un campo de mas deja al usuario sin grafico. El
-        cruce solo tiene sentido si es distinto del eje y el componente lo usa.
+        Dos correcciones, y ambas siguen el mismo criterio: **una vista
+        degradada es util; una vista descartada deja al analista sin grafico**.
+
+        1. **La dimension se ajusta al componente.** `REGLAS_GRAFICO` declara que
+           agrupaciones admite cada grafico —una dona reparte proporciones de
+           pocas categorias y no se lee por año; una serie temporal se lee sobre
+           el eje del tiempo— pero el esquema no las aplicaba, y el tablero
+           recibia combinaciones que sus propias reglas declaran imposibles.
+           Manda el componente y cede la dimension, no al reves: el modelo
+           acierta que forma pide la pregunta mucho mas a menudo que sobre que
+           dimension agruparla.
+
+        2. **Un cruce que no se puede pintar se quita.** Medido con el modelo
+           real: el cruce solo tiene sentido si es distinto del eje y si el
+           componente lo usa.
         """
+        regla = REGLAS_GRAFICO.get(self.chart)
+        if regla and self.group_by is not None and self.group_by not in regla["group_by"]:
+            self.group_by = regla["por_defecto"]
+
         eje = "anio" if self.chart == "timeline" else self.group_by
         if self.serie_por is not None and (
             self.serie_por == eje or self.chart not in SERIE_POR_CHARTS

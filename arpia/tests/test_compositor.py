@@ -121,3 +121,51 @@ def test_los_titulos_de_las_complementarias_llevan_tildes():
     principal = ViewSpec(chart="bar", group_by="organizacion", fenomenos=["F1"])
     for v in componer(principal, F1)[1:]:
         assert "organizacion" not in v.titulo, v.titulo
+
+
+# -- mas angulos, sin relleno -----------------------------------------------
+
+
+def test_ofrece_la_evolucion_anual_de_la_dimension_pedida():
+    """`serie_por` cruza dos dimensiones: el año contra lo que se pregunto.
+    Responde "y esto cómo se reparte por año", que sigue a casi cualquier
+    comparación."""
+    principal = ViewSpec(chart="bar", group_by="organizacion", fenomenos=["F1"])
+    temporales = [v for v in componer(principal, F1)[1:] if v.chart == "timeline"]
+    assert temporales, "no ofrecio la evolucion anual"
+    assert temporales[0].serie_por == "organizacion"
+    assert "34" in temporales[0].nota, "una vista temporal sin su aviso de cobertura"
+
+
+def test_el_cruce_temporal_no_se_ofrece_sobre_una_serie_temporal():
+    """Cruzar el año consigo mismo no pinta nada."""
+    principal = ViewSpec(chart="timeline", group_by="anio")
+    assert not [v for v in componer(principal, F1)[1:] if v.chart == "timeline"]
+
+
+def test_el_cruce_temporal_necesita_varias_categorias():
+    """Una serie de una sola linea es una serie simple con pasos de mas."""
+    principal = ViewSpec(chart="bar", group_by="organizacion")
+    una = [Fila("Unica", 100, ["D-1"])]
+    assert not [v for v in componer(principal, una)[1:] if v.chart == "timeline"]
+
+
+def test_ofrece_la_composicion_por_formato():
+    """Distingue la fuente que publica informes de la que publica datos."""
+    principal = ViewSpec(chart="bar", group_by="organizacion", fenomenos=["F1"])
+    apiladas = [v for v in componer(principal, F1)[1:] if v.chart == "stacked_bar"]
+    assert apiladas and apiladas[0].serie_por == "formato"
+
+
+def test_sigue_sin_pasarse_del_tope_con_las_reglas_nuevas():
+    principal = ViewSpec(chart="bar", group_by="organizacion", fenomenos=["F1"])
+    assert len(componer(principal, F1)) <= 1 + MAX_COMPLEMENTARIAS
+
+
+def test_toda_complementaria_nueva_sigue_siendo_un_viewspec_valido():
+    """Las reglas del componente valen tambien para lo que propone el compositor."""
+    principal = ViewSpec(chart="bar", group_by="organizacion", fenomenos=["F1"])
+    for v in componer(principal, F1):
+        revalidada = ViewSpec.model_validate(v.model_dump())
+        assert revalidada.chart == v.chart
+        assert revalidada.group_by == v.group_by, "la regla del grafico corrigio la dimension"

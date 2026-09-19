@@ -457,12 +457,21 @@ AGENTE_VISUALIZADOR = "agente_visualizador"
 
 @registrar(AGENTE_VISUALIZADOR)
 def visualizador(paso: Paso) -> Resultado:
-    """Emite un `ViewSpec` validado. UNA llamada, al modelo pequeno.
+    """Emite un `ViewSpec` validado. UNA llamada.
 
-    El modelo grande no compra nada aqui: la salida es JSON dentro de un
-    vocabulario cerrado, no prosa. Si lo que emite no valida, se descarta y el
-    turno sigue con la respuesta de texto: una vista invalida no puede llegar al
-    tablero ni tumbar la respuesta.
+    **Por que el modelo grande, si la salida es JSON.** El razonamiento fue que
+    un vocabulario cerrado no necesita capacidad: solo hay que elegir dentro de
+    una lista. Lo que se midio despues dice otra cosa —el modelo pequeno
+    devolvia las claves con la capitalizacion del esquema (`Chart`, `Group By`),
+    y con `serie_por` visible cambiaba el fenomeno filtrado en 4 de 4 corridas—.
+    Elegir bien dentro de una lista cerrada SI es razonamiento cuando la
+    pregunta es ambigua: que dimension responde lo que se pregunto, y si el
+    periodo mencionado es un filtro o solo contexto.
+
+    El coste extra esta acotado: una llamada por turno, y solo en los turnos que
+    piden vista. Si lo que emite no valida, se descarta y el turno sigue con la
+    respuesta de texto: una vista invalida no puede llegar al tablero ni tumbar
+    la respuesta.
     """
     from src.api.contracts import ViewSpec
     from src.tools.analytics import componentes_disponibles

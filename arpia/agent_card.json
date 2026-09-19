@@ -78,7 +78,7 @@
       "id": "agente_visualizador",
       "nombre": "Agente generador de visualizaciones",
       "descripcion": "Traduce la instruccion en lenguaje natural del usuario a una especificacion de vista validada contra esquema cerrado, decidiendo que componente del tablero activar y con que filtros poblarlo. No ejecuta codigo arbitrario ni consultas SQL libres: emite unicamente una estructura declarativa que el tablero renderiza.",
-      "modelo": "gpt-oss-20b",
+      "modelo": "gpt-oss-120b",
       "proveedor": "openai",
       "activado_por": "orquestador",
       "ejemplos_de_activacion": [

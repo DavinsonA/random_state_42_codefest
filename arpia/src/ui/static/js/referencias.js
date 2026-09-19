@@ -54,7 +54,16 @@ export function partirPorReferencias(texto, ids) {
 
 /** Las dos lineas descriptivas de una cita: de quien es y que lugar ocupa. */
 export function describirCita(cita) {
-    const origen = [cita.fuente, cita.anio, cita.formato ? String(cita.formato).toUpperCase() : null]
+    // `organizacion` antes que `fuente`: cuando la organizacion no se conoce,
+    // `fuente` cae a la ruta del archivo, y "F2_Seguridad.../pdfs/informe.pdf"
+    // no dice de quien es el documento, dice donde esta guardado. El fenomeno
+    // situa la cita cuando la respuesta cruza varios.
+    const origen = [
+        cita.organizacion || cita.fuente,
+        cita.fenomeno_nombre,
+        cita.anio,
+        cita.formato ? String(cita.formato).toUpperCase() : null,
+    ]
         .filter((x) => x !== null && x !== undefined && x !== "")
         .join(" · ");
     const conPosicion = Number.isInteger(cita.posicion) && Number.isInteger(cita.total_fragmentos);

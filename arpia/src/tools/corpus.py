@@ -37,16 +37,33 @@ def _cita(doc_id: str, chunk_id: str, fila: dict, texto: str) -> dict:
     `/chat` la usan, para que una cita salga igual venga de donde venga. Los
     campos que la fila no tiene salen como None y el contrato los admite.
     """
+    # `organizacion` y `fenomeno` van aparte de `fuente` a proposito: `fuente`
+    # cae a la ruta del archivo cuando no se conoce la organizacion, y una
+    # referencia que muestra "F2_Seguridad.../SWF_Counterspace/pdfs/..." no dice
+    # de quien es el documento, dice donde esta guardado. El analista necesita
+    # lo primero para ponderar la evidencia.
+    organizacion = fila.get("organizacion")
     return {
         "doc_id": doc_id,
         "chunk_id": chunk_id,
-        "fuente": fila.get("organizacion") or fila.get("fuente"),
+        "fuente": organizacion or fila.get("fuente"),
         "fragmento": texto[:FRAGMENTO_CHARS],
         "formato": fila.get("formato"),
         "posicion": fila.get("posicion"),
         "total_fragmentos": fila.get("total_fragmentos"),
         "anio": fila.get("anio"),
+        "organizacion": str(organizacion).replace("_", " ") if organizacion else None,
+        "fenomeno": fila.get("fenomeno_id") or _fenomeno_id(fila.get("fenomeno")),
+        "fenomeno_nombre": fila.get("fenomeno_nombre"),
     }
+
+
+def _fenomeno_id(valor: object) -> str | None:
+    """La metadata guarda el fenomeno como 1, 2 o 3; el contrato usa F1, F2, F3."""
+    if valor in (None, ""):
+        return None
+    crudo = str(valor)
+    return crudo if crudo.startswith("F") else f"F{crudo}"
 
 
 def _get_index() -> VectorIndex:
