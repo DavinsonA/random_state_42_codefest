@@ -17,7 +17,7 @@ _index: VectorIndex | None = None
 def _get_index() -> VectorIndex:
     global _index
     if _index is None:
-        _index = VectorIndex(os.getenv("VECTOR_INDEX_PATH", "data/base_vectorial/encoder_bge_m3"))
+        _index = VectorIndex(os.getenv("VECTOR_INDEX_PATH", "data/encoder_bge_m3"))
     return _index
 
 
@@ -71,22 +71,14 @@ def list_documents(doc_ids: list[str]) -> str:
     Returns:
         Una linea por documento con sus metadatos, o aviso de no encontrado.
     """
-    index = _get_index()
-    index._load()  # noqa: SLF001 - acceso deliberado al cargador perezoso
-    meta = index._meta or []  # noqa: SLF001
-
-    wanted = set(doc_ids)
-    vistos: dict[str, dict] = {}
-    for row in meta:
-        did = row.get("doc_id")
-        if did in wanted and did not in vistos:
-            vistos[did] = row
-
+    vistos = _get_index().documents_meta(doc_ids)
     if not vistos:
         return f"Ningun documento encontrado para: {', '.join(doc_ids)}"
 
     return "\n".join(
-        f"{did}: fuente={row.get('fuente', '?')} formato={row.get('formato', '?')} "
-        f"fenomeno={row.get('fenomeno', '?')}"
+        f"{did}: organizacion={row.get('organizacion', '?')} "
+        f"anio={row.get('anio', 'no identificado')} "
+        f"formato={row.get('formato', '?')} "
+        f"fenomeno={row.get('fenomeno_nombre', '?')}"
         for did, row in vistos.items()
     )
