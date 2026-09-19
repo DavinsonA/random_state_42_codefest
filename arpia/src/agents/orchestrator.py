@@ -66,6 +66,11 @@ Reglas:
   visualizador casi nunca dependen entre si.
 - Si la pregunta pide datos Y una vista, planifica ambos agentes.
 - `fenomeno` solo si la pregunta lo acota de forma clara.
+- Si la pregunta es CLARAMENTE ajena a los tres fenomenos (deportes, cocina,
+  espectaculos, cultura general...), devuelve `pasos: []` y en `razonamiento`
+  di que es ajena. Tu salida es SIEMPRE el plan: no la respondas en texto ni te
+  disculpes. Ante la duda, planifica `agente_documental`: una pregunta general
+  sobre satelites, inteligencia artificial o conflicto SI es del dominio.
 """
 
 _REPLAN = """La primera pasada no encontro evidencia suficiente. Motivo:
@@ -159,6 +164,15 @@ def planificar(
             )
 
             plan = crudo.get("parsed") if isinstance(crudo, dict) else crudo
+            if isinstance(plan, Plan) and not plan.pasos and not motivo:
+                # Plan vacio y explicito: el orquestador declara la consulta ajena al
+                # dominio. Antes se trataba como un plan invalido y caia al respaldo
+                # documental, que buscaba material sin relacion (medido: 8.879 tokens
+                # para "quien gano el Mundial"). En una replanificacion (`motivo`) un
+                # plan vacio si es un fallo: ahi ya hubo una busqueda sin evidencia.
+                log.info("el orquestador declaro la consulta fuera de dominio")
+                sp.set_output(f"fuera de dominio: {plan.razonamiento[:200]}")
+                return plan
             if not isinstance(plan, Plan) or not plan.pasos:
                 log.warning("el orquestador no devolvio un plan usable; se usa el de respaldo")
                 turnlog.marcar_no_cacheable("plan_de_respaldo")

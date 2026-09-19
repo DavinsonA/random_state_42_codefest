@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import contextvars
 from concurrent.futures import ThreadPoolExecutor
+from itertools import zip_longest
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
@@ -106,6 +107,12 @@ def ejecutar(state: AgentState) -> dict[str, Any]:
     plan = Plan.model_validate(state["plan"])
     pasos = plan.pasos
 
+    if not pasos:
+        # Consulta ajena al dominio (plan vacio del orquestador): nada que ejecutar
+        # y nada que replanificar. Sin `suficiente=True` el grafo volveria a
+        # planificar y pagaria una segunda llamada para llegar al mismo lugar.
+        return {"evidence": [], "findings": {}, "view_spec": None, "suficiente": True}
+
     # En una replanificacion solo se repite lo que fallo. El visualizador no
     # depende de la evidencia: volver a emitir su vista seria pagar una segunda
     # llamada por el mismo JSON.
@@ -130,8 +137,6 @@ def ejecutar(state: AgentState) -> dict[str, Any]:
     else:
         resultados = [executors.ejecutar(p) for p in pasos]
 
-    evidencia: list[dict[str, Any]] = []
-    vistos: set[str] = set()
     findings: dict[str, str] = {}
     view_spec = None
     for r in resultados:
@@ -141,14 +146,22 @@ def ejecutar(state: AgentState) -> dict[str, Any]:
             findings[r.agente] = r.texto
         if r.view_spec:
             view_spec = r.view_spec
-        for e in r.evidencia:
+
+    # Intercalada por pasos, NO ordenada por puntaje. El redactor solo ve los TOP_K
+    # primeros: con un orden global, el tema con mejores puntajes se los queda todos
+    # y el otro lado de una comparacion desaparece (medido: "amenazas a satelites
+    # vs IA en defensa" daba 8 fragmentos de IA y 0 de satelites, y la respuesta
+    # afirmaba que el corpus no tenia nada sobre satelites). Cada lista ya viene
+    # ordenada por puntaje; con un solo paso el resultado es el mismo de siempre.
+    evidencia: list[dict[str, Any]] = []
+    vistos: set[str] = set()
+    for turno in zip_longest(*(r.evidencia for r in resultados if r.evidencia)):
+        for e in turno:
             # El corpus tiene fragmentos repetidos entre documentos: citarlos dos
             # veces no agrega evidencia, solo gasta contexto.
-            if e["chunk_id"] not in vistos:
+            if e is not None and e["chunk_id"] not in vistos:
                 vistos.add(e["chunk_id"])
                 evidencia.append(e)
-
-    evidencia.sort(key=lambda e: -e.get("score", 0.0))
 
     # La suficiencia la deciden SOLO los agentes que buscan evidencia. Una vista
     # emitida no dice nada sobre si encontramos material: contarla como exito
@@ -182,6 +195,12 @@ def componer(state: AgentState) -> dict[str, Any]:
     aviso de la vista, que es una accion sobre el tablero y no parte de la
     respuesta.
     """
+    if not (state.get("plan") or {}).get("pasos"):
+        # El orquestador declaro la consulta fuera de dominio: respuesta fija, sin
+        # modelo (`voz.FUERA_DE_DOMINIO`, la misma que da el guardian).
+        texto = voz.FUERA_DE_DOMINIO
+        return {"answer": texto, "messages": [AIMessage(content=texto)]}
+
     findings = dict(state.get("findings") or {})
     evidencia = state.get("evidence") or []
 

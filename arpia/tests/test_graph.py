@@ -310,6 +310,93 @@ def test_el_plan_de_respaldo_marca_el_turno_como_no_cacheable(entorno):
     assert turnlog.no_cacheable() == "plan_de_respaldo"
 
 
+class IndicePorTema:
+    """Un tema puntua MAS ALTO que el otro, como "IA en defensa" frente a "amenazas
+    a satelites" en el corpus real (0,62 frente a 0,55)."""
+
+    def search(self, query: str, k: int = 8):  # noqa: ARG002
+        sat = "satelit" in query.lower()
+        pref, fen, base = ("F2-SAT", 2, 0.55) if sat else ("F1-IA", 1, 0.62)
+        return [
+            Hit(
+                chunk_id=f"{pref}-{i}",
+                doc_id=f"{pref}-{i}",
+                text=f"texto {i} sobre {query}",
+                score=base - i * 0.001,
+                metadata={"fenomeno": fen, "organizacion": "X"},
+            )
+            for i in range(8)
+        ]
+
+
+def _plan_de_comparacion() -> Plan:
+    return Plan(
+        pasos=[
+            Paso(agente="agente_documental", consulta="amenazas a los satelites", fenomeno="F2"),
+            Paso(agente="agente_documental", consulta="uso de ia en defensa", fenomeno="F1"),
+        ],
+        paralelo=False,
+    )
+
+
+def test_una_comparacion_lleva_evidencia_de_los_dos_temas_al_redactor(entorno, monkeypatch):
+    """Antes se ordenaba la mezcla por puntaje y el redactor (que ve 8) recibia 8 de
+    IA y 0 de satelites: la respuesta afirmaba que el corpus no decia nada de satelites."""
+    g, llm, _ = entorno(plan=_plan_de_comparacion())
+    monkeypatch.setattr(corpus, "_index", IndicePorTema())
+    g.invoke({"question": "compara satelites con ia"}, _config("h-comparar"))
+
+    sobres = _usuario(llm.mensajes_redaccion[0])  # [0]: la redaccion; despues viene el verificador
+    assert sobres.count("documento: F2-SAT") == 4
+    assert sobres.count("documento: F1-IA") == 4
+
+
+def test_con_un_solo_paso_la_evidencia_sigue_ordenada_por_puntaje(entorno, monkeypatch):
+    plan = Plan(pasos=[Paso(agente="agente_documental", consulta="uso de ia en defensa")])
+    g, llm, _ = entorno(plan=plan)
+    monkeypatch.setattr(corpus, "_index", IndicePorTema())
+    g.invoke({"question": "ia en defensa"}, _config("h-un-paso"))
+
+    sobres = _usuario(llm.mensajes_redaccion[0])  # [0]: la redaccion; despues viene el verificador
+    assert sobres.index("F1-IA-0") < sobres.index("F1-IA-1") < sobres.index("F1-IA-7")
+
+
+# -- consulta ajena al dominio -------------------------------------------------
+
+
+def test_una_consulta_ajena_al_dominio_se_rechaza_sin_buscar_ni_redactar(entorno):
+    """El orquestador declara `pasos: []`. Antes caia al plan de respaldo, buscaba
+    material sin relacion y gastaba 8.879 tokens para responder sobre un Mundial."""
+    g, llm, indice = entorno(plan=Plan(razonamiento="deportes", pasos=[]))
+    out = g.invoke({"question": "quien gano el mundial de futbol"}, _config("h-ajena"))
+
+    assert out["answer"] == voz.FUERA_DE_DOMINIO
+    assert llm.llamadas == ["plan"], "una sola llamada: la del orquestador"
+    assert indice.consultas == [], "no se busco nada en el corpus"
+
+
+def test_un_plan_vacio_del_orquestador_no_cae_al_respaldo():
+    from src.agents import orchestrator
+    from src.observability import turnlog
+
+    llm = FakeLLM(plan=Plan(razonamiento="ajena", pasos=[]))
+    turnlog.start_turn()
+    plan = orchestrator.planificar("quien gano el mundial", modelo=llm)
+
+    assert plan.pasos == []
+    assert turnlog.no_cacheable() == ""  # no es un respaldo: es una decision
+
+
+def test_un_plan_vacio_al_replanificar_si_es_un_fallo():
+    """Ya hubo una busqueda sin evidencia: un plan vacio no puede significar 'ajena'."""
+    from src.agents import orchestrator
+
+    llm = FakeLLM(plan=Plan(pasos=[]))
+    plan = orchestrator.planificar("algo", motivo="sin evidencia", modelo=llm)
+
+    assert [p.agente for p in plan.pasos] == ["agente_documental"]
+
+
 def test_un_plan_valido_no_marca_el_turno(entorno):
     from src.observability import turnlog
 

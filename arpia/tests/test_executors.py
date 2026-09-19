@@ -211,7 +211,56 @@ def test_el_analitico_declara_lo_que_deja_fuera(llm):
     """Un conteo por ano que ignora en silencio los documentos sin ano es una
     cifra enganosa."""
     r = executors.analitico(Paso(agente="agente_analitico", consulta="evolucion por ano"))
-    assert "no declaran anio" in r.texto
+    assert "no declaran año" in r.texto
+
+
+def _agregado_falso(filas):
+    """Resultado de `aggregates.agregar` con las filas dadas, en ese orden."""
+    return {
+        "filas": filas,
+        "cobertura": {
+            "documentos_universo": 10,
+            "documentos_en_dimension": 10,
+            "documentos_contados": 10,
+            "sin_dato_en_la_dimension": 0,
+        },
+    }
+
+
+def test_el_texto_del_conteo_usa_los_nombres_en_castellano(llm):
+    """`anio` no es una palabra: el analista lee "por año", "por organización"."""
+    por_anio = executors.analitico(Paso(agente="agente_analitico", consulta="x", group_by="anio"))
+    por_org = executors.analitico(
+        Paso(agente="agente_analitico", consulta="x", group_by="organizacion")
+    )
+    assert "por año:" in por_anio.texto
+    assert "por organización:" in por_org.texto
+    assert "anio" not in por_anio.texto.replace("F1-A", "")
+
+
+def test_un_conteo_de_uno_va_en_singular(llm, monkeypatch):
+    fila = {"clave": "CSET", "valor": 1, "doc_ids": ["F1-A-1"]}
+    monkeypatch.setattr(aggregates, "agregar", lambda **_k: _agregado_falso([fila]))
+    r = executors.analitico(Paso(agente="agente_analitico", consulta="x", group_by="organizacion"))
+    assert "CSET: 1 documento (" in r.texto
+    assert "1 documentos" not in r.texto
+
+
+def test_la_serie_por_anio_sale_en_orden_cronologico_no_por_cantidad(llm, monkeypatch):
+    filas = [
+        {"clave": "2025", "valor": 90, "doc_ids": ["F1-A-2"]},
+        {"clave": "2020", "valor": 30, "doc_ids": ["F1-A-1"]},
+        {"clave": "2022", "valor": 50, "doc_ids": ["F3-C-1"]},
+    ]
+    monkeypatch.setattr(aggregates, "agregar", lambda **_k: _agregado_falso(filas))
+    r = executors.analitico(Paso(agente="agente_analitico", consulta="x", group_by="anio"))
+    assert r.texto.index("2020:") < r.texto.index("2022:") < r.texto.index("2025:")
+
+
+def test_el_redactor_respeta_el_formato_que_pide_la_pregunta():
+    """ "En una sola frase" mandaba la estructura fija: el redactor la ignoraba."""
+    assert "FORMATO PEDIDO" in executors.REDACCION_PROMPT
+    assert "en una sola frase" in executors.REDACCION_PROMPT
 
 
 def test_el_analitico_registra_su_tool_en_la_traza(llm):

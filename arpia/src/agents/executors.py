@@ -68,6 +68,13 @@ ESTRUCTURA
 1. Una frase con la respuesta.
 2. El desarrollo, cada afirmacion con su fuente caracterizada.
 3. Si aplica, un parrafo final con lo que el corpus no cubre.
+
+FORMATO PEDIDO
+
+Si la pregunta pide una extension o una forma concreta ("en una sola frase",
+"en tres puntos", "brevemente", "en una tabla"), eso manda sobre la estructura
+de arriba: entrega solo lo pedido, con su fuente entre parentesis, sin el
+desarrollo ni el parrafo final.
 """
 
 VISUALIZADOR_PROMPT = f"""Eres el generador de visualizaciones de A.R.P.I.A.
@@ -320,6 +327,15 @@ _DIMENSIONES = (
 )
 
 
+_NOMBRE_DIMENSION = {
+    "fenomeno": "fenómeno",
+    "organizacion": "organización",
+    "fuente": "fuente",
+    "formato": "formato",
+    "anio": "año",
+}
+
+
 def _dimension(consulta: str) -> str:
     from src.retrieval.enrich import _ANIO  # noqa: PLC0415
 
@@ -365,9 +381,17 @@ def analitico(paso: Paso) -> Resultado:
 
     unidad = "fragmentos" if metrica == "conteo_fragmentos" else "documentos"
     cobertura = resultado["cobertura"]
+    # El texto es lo que lee el analista: la dimension con su nombre en castellano
+    # (`anio` no es una palabra), y la serie temporal en orden cronologico, no por
+    # cantidad. `group_by` sigue siendo el identificador del vocabulario cerrado.
+    dimension = _NOMBRE_DIMENSION.get(group_by, group_by)
+    if group_by == "anio":
+        filas = sorted(filas, key=lambda f: f["clave"])
 
     def cifra(f: dict[str, Any]) -> str:
-        return f"{f['clave']}: {f['valor']:,} {unidad}".replace(",", ".")
+        n = f["valor"]
+        nombre = unidad[:-1] if n == 1 else unidad  # "1 documento", no "1 documentos"
+        return f"{f['clave']}: {n:,} {nombre}".replace(",", ".")
 
     def muestra(f: dict[str, Any]) -> list[str]:
         """Documentos reales que sustentan la cifra. La cifra es el conteo TOTAL;
@@ -386,7 +410,7 @@ def analitico(paso: Paso) -> Resultado:
         aviso = (
             f"{cobertura['sin_dato_en_la_dimension']} de "
             f"{cobertura['documentos_en_dimension']} documentos no declaran "
-            f"{group_by} y quedan fuera de este conteo."
+            f"{dimension} y quedan fuera de este conteo."
         )
 
     # Lo que ADL llama `retrieval_context`: lo que se uso para armar la respuesta.
@@ -409,7 +433,7 @@ def analitico(paso: Paso) -> Resultado:
 
     return Resultado(
         agente=AGENTE_ANALITICO,
-        texto=f"Conteo de {unidad} por {group_by}:\n{lineas}" + (f"\n\n{aviso}" if aviso else ""),
+        texto=f"Conteo de {unidad} por {dimension}:\n{lineas}" + (f"\n\n{aviso}" if aviso else ""),
         # TODAS las filas que muestra el texto, no las 10 primeras: una cifra sin
         # evidencia detras es justo lo que el verificador tiene que poder detectar.
         evidencia=[

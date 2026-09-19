@@ -171,7 +171,7 @@ def test_llena_retrieval_context_con_una_linea_por_cifra():
 def test_la_cobertura_que_declara_el_texto_tambien_tiene_respaldo_en_el_contexto():
     _contar("anio")  # ALERTAS-001 no declara ano: el texto lo dice
     contexto = " ".join(turnlog.retrieval_context())
-    assert "no declaran anio" in contexto
+    assert "no declaran año" in contexto
 
 
 # -- el verificador ----------------------------------------------------------
