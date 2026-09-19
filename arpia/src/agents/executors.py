@@ -364,16 +364,24 @@ def analitico(paso: Paso) -> Resultado:
     # agente conteste por una dimension distinta de la preguntada.
     group_by = paso.group_by or _dimension(paso.consulta)
     metrica = "conteo_fragmentos" if "fragmento" in paso.consulta.lower() else "conteo_documentos"
+    # El periodo y el tope ("entre 2020 y 2025", "las 5 organizaciones") se leen de la consulta:
+    # sin esto el texto contestaba con todos los anos y todas las categorias aunque la pregunta
+    # pidiera un recorte, y la vista y el texto decian cosas distintas.
+    from src.agents.vista_respaldo import limite_de_pregunta, periodo_de_pregunta  # noqa: PLC0415
+
+    desde, hasta = periodo_de_pregunta(paso.consulta)
+    limite = None if group_by == "anio" else limite_de_pregunta(paso.consulta)
     resultado = aggregates.agregar(
         metrica=metrica,  # type: ignore[arg-type]
         group_by=group_by,  # type: ignore[arg-type]
         fenomenos=[paso.fenomeno] if paso.fenomeno else None,  # type: ignore[list-item]
+        desde=int(desde) if desde else None,
+        hasta=int(hasta) if hasta else None,
+        **({"limite": limite} if limite else {}),
     )
-    turnlog.record_tool_call(
-        "consultar_agregado",
-        {"metrica": metrica, "group_by": group_by, "fenomenos": paso.fenomeno or ""},
-        json.dumps(resultado, ensure_ascii=False),
-    )
+    parametros = {"metrica": metrica, "group_by": group_by, "fenomenos": paso.fenomeno or ""}
+    parametros.update({k: v for k, v in (("desde", desde), ("hasta", hasta), ("limite", limite)) if v})
+    turnlog.record_tool_call("consultar_agregado", parametros, json.dumps(resultado, ensure_ascii=False))
 
     filas = resultado["filas"]
     if not filas:
@@ -411,6 +419,12 @@ def analitico(paso: Paso) -> Resultado:
             f"{cobertura['sin_dato_en_la_dimension']} de "
             f"{cobertura['documentos_en_dimension']} documentos no declaran "
             f"{dimension} y quedan fuera de este conteo."
+        )
+
+    if (desde or hasta) and group_by != "anio" and cobertura.get("excluidos_por_fecha"):
+        aviso = (
+            f"{aviso + ' ' if aviso else ''}El periodo pedido deja fuera "
+            f"{cobertura['excluidos_por_fecha']} documentos (todos los que no declaran año)."
         )
 
     # Lo que ADL llama `retrieval_context`: lo que se uso para armar la respuesta.

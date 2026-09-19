@@ -389,6 +389,7 @@ def view(spec: dict[str, Any]) -> JSONResponse:
             fenomenos=list(vista.fenomenos) or None,
             desde=desde,
             hasta=hasta,
+            limite=vista.limite,
         )
         vistas, hallazgos = apoyo_de_vista(vista, datos["filas"])
     except Exception as exc:  # noqa: BLE001 - el tablero nunca recibe un 500

@@ -223,3 +223,34 @@ def test_el_periodo_pedido_llega_a_la_vista_aunque_el_analista_no_lo_aplico():
         [_conteo(group_by="anio")],
     )
     assert (v.desde, v.hasta) == ("2020", "2025")
+
+
+@pytest.mark.parametrize(
+    "pregunta, esperado",
+    [
+        ("Dame una tabla con las 5 organizaciones que mas publican", 5),
+        ("los 10 principales formatos", 10),
+        ("top 3 de fuentes", 3),
+        ("Hay 5 organizaciones", None),
+        ("las 99 organizaciones", None),
+        ("por organizacion", None),
+    ],
+)
+def test_el_tope_se_toma_de_la_pregunta(pregunta, esperado):
+    assert vr.limite_de_pregunta(pregunta) == esperado
+
+
+def test_el_tope_llega_a_la_vista_pero_no_a_un_kpi_ni_a_una_serie_temporal():
+    llamadas = [_conteo()]
+    v = vr.desde_turno(
+        "Dame una tabla con las 5 organizaciones que mas publican",
+        ["agente_visualizador"],
+        llamadas,
+    )
+    assert (v.chart, v.limite) == ("table", 5)
+    kpi = vr.desde_turno("en una sola cifra los 5 primeros", ["agente_visualizador"], llamadas)
+    assert kpi.limite is None
+    serie = vr.desde_turno(
+        "evolucion de los 5 primeros anos", ["agente_visualizador"], [_conteo(group_by="anio")]
+    )
+    assert serie.limite is None

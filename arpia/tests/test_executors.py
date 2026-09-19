@@ -458,3 +458,27 @@ def test_la_delegacion_al_visualizador_usa_instruccion(llm):
     primera = turnlog.tool_calls()[0]
     assert primera["name"] == "delegar_visualizacion"
     assert primera["input_parameters"] == {"instruccion": "grafica esto"}
+
+
+def test_el_analitico_aplica_el_periodo_y_el_tope_que_pide_la_pregunta(llm, monkeypatch):
+    """Texto y vista deben decir lo mismo: antes contestaba con todos los anos."""
+    recibido = {}
+
+    def falso(**k):
+        recibido.update(k)
+        return _agregado_falso([{"clave": "SIPRI", "valor": 4, "doc_ids": ["F3-S-1"]}])
+
+    monkeypatch.setattr(aggregates, "agregar", falso)
+    executors.analitico(
+        Paso(agente="agente_analitico", consulta="las 5 organizaciones entre 2020 y 2025", group_by="organizacion")
+    )
+    assert (recibido["desde"], recibido["hasta"], recibido["limite"]) == (2020, 2025, 5)
+    params = turnlog.tool_calls()[-1]["input_parameters"]
+    assert (params["desde"], params["hasta"], params["limite"]) == ("2020", "2025", 5)
+
+
+def test_el_analitico_sin_periodo_no_lo_inventa(llm, monkeypatch):
+    recibido = {}
+    monkeypatch.setattr(aggregates, "agregar", lambda **k: recibido.update(k) or _agregado_falso([{"clave": "CSET", "valor": 1, "doc_ids": ["a"]}]))
+    executors.analitico(Paso(agente="agente_analitico", consulta="por organizacion", group_by="organizacion"))
+    assert recibido["desde"] is None and recibido["hasta"] is None and "limite" not in recibido

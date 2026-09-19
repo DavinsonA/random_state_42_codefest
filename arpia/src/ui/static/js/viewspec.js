@@ -64,6 +64,7 @@ export function normalizar(vs) {
         hasta: anio(vs.hasta),
         group_by: vs.chart === "kpi" ? null : groupBy,
         serie_por: serie,
+        limite: Number.isInteger(vs.limite) && vs.limite >= 1 && vs.limite <= 25 ? vs.limite : null,
         titulo: typeof vs.titulo === "string" ? vs.titulo : "",
         nota: typeof vs.nota === "string" ? vs.nota : "",
     };

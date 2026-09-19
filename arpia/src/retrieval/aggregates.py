@@ -199,6 +199,7 @@ def agregar_series(
     organizacion: str | None = None,
     desde: int | None = None,
     hasta: int | None = None,
+    limite: int | None = None,
 ) -> dict[str, Any]:
     """Conteo en dos dimensiones: categorias (eje) x series (colores). CERO tokens.
 
@@ -208,6 +209,7 @@ def agregar_series(
     discrepen.
 
     Args:
+        limite: tope de categorias (las de mayor total); no aplica al ano.
         serie_por: dimension que separa las series. None = una sola serie `total`.
             No puede coincidir con `group_by`.
 
@@ -242,9 +244,10 @@ def agregar_series(
     temporal = group_by == "anio"
     cuales = sorted(por_categoria, key=lambda c: (-por_categoria[c], c))
     omitidas = 0
-    if not temporal and len(cuales) > MAX_CATEGORIAS:
-        omitidas = len(cuales) - MAX_CATEGORIAS
-        cuales = cuales[:MAX_CATEGORIAS]
+    tope = min(MAX_CATEGORIAS, limite) if limite else MAX_CATEGORIAS
+    if not temporal and len(cuales) > tope:
+        omitidas = len(cuales) - tope
+        cuales = cuales[:tope]
     categorias = sorted(cuales) if temporal else cuales
 
     por_serie = {s: sum(celdas[s].get(c, 0) for c in categorias) for s in celdas}

@@ -169,3 +169,11 @@ def test_toda_complementaria_nueva_sigue_siendo_un_viewspec_valido():
         revalidada = ViewSpec.model_validate(v.model_dump())
         assert revalidada.chart == v.chart
         assert revalidada.group_by == v.group_by, "la regla del grafico corrigio la dimension"
+
+
+def test_una_serie_temporal_no_se_acompana_de_una_dona_de_anios():
+    """La dona por ano no existe (REGLAS_GRAFICO): salia como un anillo de una sola porcion."""
+    principal = ViewSpec(chart="timeline", group_by="anio", titulo="Documentos por ano")
+    concentradas = [Fila("2025", 90), Fila("2024", 60), Fila("2023", 5), Fila("2022", 3), Fila("2021", 2)]
+    vistas = componer(principal, concentradas)
+    assert not any(v.chart == "donut" for v in vistas)

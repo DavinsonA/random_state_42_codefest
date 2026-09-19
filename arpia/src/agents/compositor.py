@@ -90,6 +90,11 @@ def _composicion(principal: ViewSpec, ordenadas: list[Fila], total: int) -> View
     """
     if principal.chart == "donut" or len(ordenadas) < MIN_CATEGORIAS:
         return None
+    # Una dona de anios no dice nada (REGLAS_GRAFICO no la admite): la serie temporal ya
+    # muestra la forma, y el validador la degradaba a una dona por fenomeno con el titulo
+    # "Proporcion por ano" y un anillo de una sola porcion.
+    if principal.chart == "timeline" or principal.group_by == "anio":
+        return None
     if sum(f.valor for f in ordenadas[:2]) / total < UMBRAL_CONCENTRACION:
         return None
     return ViewSpec(

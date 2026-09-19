@@ -255,3 +255,9 @@ test("el aviso del servidor no repite la nota que la vista ya trae", async () =>
     const { datos } = await cargar(spec);
     assert.equal(datos.nota, "174 de 479 documentos no declaran ano.");
 });
+
+test("normalizar conserva el tope de categorias solo si es valido", () => {
+    assert.equal(normalizar({ chart: "table", group_by: "organizacion", limite: 5 }).limite, 5);
+    assert.equal(normalizar({ chart: "table", group_by: "organizacion", limite: 500 }).limite, null);
+    assert.equal(normalizar({ chart: "table", group_by: "organizacion" }).limite, null);
+});

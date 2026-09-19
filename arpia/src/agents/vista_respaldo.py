@@ -146,6 +146,22 @@ def periodo_de_pregunta(pregunta: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+_LIMITE = re.compile(r"\b(?:las|los|top|primeras|primeros|principales)\s+(\d{1,2})\b")
+_TOPE_LIMITE = 25
+
+
+def limite_de_pregunta(pregunta: str) -> int | None:
+    """`5` si la pregunta pide "las 5 organizaciones que mas publican"; None si no pide un tope.
+
+    `ViewSpec` no tiene un campo de limite que el modelo vea (medido: cada campo visible mueve
+    sus decisiones), asi que el tope lo pone este codigo, que lee la pregunta.
+    """
+    if m := _LIMITE.search(_plano(pregunta)):
+        n = int(m.group(1))
+        return n if 1 <= n <= _TOPE_LIMITE else None
+    return None
+
+
 def fenomeno_de_pregunta(pregunta: str) -> list[str]:
     """`["F3"]` si la pregunta nombra un unico fenomeno; `[]` si ninguno o varios."""
     p = _plano(pregunta)
@@ -202,6 +218,11 @@ def desde_turno(
         fenomenos = fenomeno_de_pregunta(pregunta)
 
     chart = elegir_grafico(pregunta, group_by)
+    limite = None
+    if conteo is not None and str(conteo.get("limite") or "").isdigit():
+        limite = int(conteo["limite"])
+    elif chart not in ("kpi", "timeline"):
+        limite = limite_de_pregunta(pregunta)
     unidad = "Fragmentos" if metrica == "conteo_fragmentos" else "Documentos"
     titulo = (
         f"{unidad} en total"
@@ -217,6 +238,7 @@ def desde_turno(
             metrica=metrica,
             fenomenos=fenomenos,
             group_by=None if chart == "kpi" else group_by,
+            limite=limite,
             desde=desde,
             hasta=hasta,
             titulo=titulo,
