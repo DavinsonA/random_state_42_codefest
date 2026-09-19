@@ -28,6 +28,7 @@ class Settings:
     log_level: str
     arpia_mode: str
     session_ttl_s: int
+    debug_trace: bool
 
     @property
     def llm_configured(self) -> bool:
@@ -52,6 +53,10 @@ def get_settings() -> Settings:
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         arpia_mode=mode,
         session_ttl_s=int(os.getenv("SESSION_TTL_S", "3600")),
+        # Apagado por defecto y a proposito: la traza contiene el texto de la
+        # pregunta, los fragmentos recuperados y la salida del modelo. En el
+        # despliegue evaluado eso no puede estar accesible sin autenticacion.
+        debug_trace=os.getenv("ARPIA_DEBUG_TRACE", "").strip().lower() in ("1", "true", "yes"),
     )
 
 

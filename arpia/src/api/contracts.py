@@ -264,6 +264,9 @@ class HealthResponse(BaseModel):
     index_loaded: bool
     gateway_reachable: bool
     agent_card_loaded: bool
+    debug_trace: bool = Field(
+        False, description="GET /api/trace publica entradas y salidas de los turnos."
+    )
     memoria_persistente: bool = Field(
         False,
         description=(

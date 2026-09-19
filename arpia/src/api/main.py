@@ -171,6 +171,8 @@ def health(response: Response) -> HealthResponse:
     if not tools:
         warnings.append("no hay tools registradas")
 
+    if s.debug_trace:
+        warnings.append("ARPIA_DEBUG_TRACE activo: /api/trace publica el contenido de los turnos")
     if s.is_stub:
         warnings.append("modo stub: las respuestas son simuladas, NO aptas para evaluacion")
         status = "degraded"
@@ -190,6 +192,7 @@ def health(response: Response) -> HealthResponse:
         index_loaded=index_loaded,
         gateway_reachable=gateway_reachable,
         agent_card_loaded=card_loaded,
+        debug_trace=s.debug_trace,
         memoria_persistente=checkpoint.es_persistente(),
         encoder_listo=encoder.loaded(),
         agentes_registrados=agent_ids(),

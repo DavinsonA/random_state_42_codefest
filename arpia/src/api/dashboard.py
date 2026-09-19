@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
-from src.config import get_logger
+from src.config import get_logger, get_settings
 from src.observability import tracing
 
 log = get_logger(__name__)
@@ -136,6 +136,97 @@ def timeline(
         return _error(f"linea de tiempo no disponible: {type(exc).__name__}")
 
 
+@router.post("/view")
+def view(spec: dict[str, Any]) -> JSONResponse:
+    """Resuelve un `ViewSpec` a los datos que el tablero debe pintar.
+
+    Es el puente entre los dos retos. El chat genera un `ViewSpec` y enlaza al
+    tablero con `#vista=<json>`; el tablero lo envia aqui y recibe la serie
+    lista, con su cobertura y su nota.
+
+    **Por que un endpoint y no que el tablero arme la consulta.** Traducir
+    `ViewSpec` a parametros de agregacion exige saber que `timeline` agrupa por
+    ano, que `kpi` no agrupa, y que el vocabulario cerrado es el que es. Si esa
+    logica se escribe tambien en JavaScript, hay dos copias del mismo criterio
+    en dos lenguajes, y la primera vez que una cambie el tablero pintara algo
+    que el agente no pidio. Aqui se valida contra el MISMO esquema que emite el
+    visualizador: lo que no pase la validacion no se pinta.
+
+    Args:
+        spec: el `ViewSpec` tal cual lo emitio el agente.
+
+    Returns:
+        `{disponible, chart, titulo, metrica, group_by, filas, total, cobertura,
+        aviso, nota}`. `filas` viene ordenada como corresponde al componente:
+        cronologica en las vistas temporales, de mayor a menor en el resto.
+    """
+    from pydantic import ValidationError
+
+    from src.api.contracts import ViewSpec
+    from src.retrieval import aggregates
+
+    try:
+        vista = ViewSpec.model_validate(spec)
+    except ValidationError as exc:
+        log.warning("view_spec invalido: %s", exc.errors()[:2])
+        return _error("la vista no es valida", detalle=[e.get("msg", "") for e in exc.errors()[:3]])
+
+    # Una vista temporal agrupa por ano aunque el agente no lo diga: es la unica
+    # granularidad que el corpus sostiene y evita una serie de una sola barra.
+    group_by = vista.group_by or ("anio" if vista.chart == "timeline" else "fenomeno")
+
+    try:
+        datos = aggregates.agregar(
+            metrica=vista.metrica,
+            group_by=group_by,  # type: ignore[arg-type]
+            fenomenos=list(vista.fenomenos) or None,
+            desde=int(vista.desde) if vista.desde else None,
+            hasta=int(vista.hasta) if vista.hasta else None,
+            limite=100,
+        )
+    except Exception as exc:  # noqa: BLE001 - el tablero nunca recibe un 500
+        log.warning("no se pudo resolver la vista: %s", exc)
+        return _error(f"datos no disponibles: {type(exc).__name__}")
+
+    temporal = group_by == "anio"
+    filas = sorted(datos["filas"], key=lambda f: f["clave"]) if temporal else datos["filas"]
+
+    cobertura = datos["cobertura"]
+    universo = cobertura["documentos_en_dimension"]
+
+    # La nota del agente no reemplaza al dato medido: el numero va primero.
+    # Y se avisa SIEMPRE que se hayan perdido documentos, sea la vista temporal
+    # o no: un rango de anos sobre un conteo por organizacion borra a todo el
+    # que no declare fecha, y la grafica sale creible y falsa.
+    medidos: list[str] = []
+    if temporal and cobertura["sin_dato_en_la_dimension"]:
+        medidos.append(
+            f"{cobertura['sin_dato_en_la_dimension']} de {universo} documentos "
+            "no declaran ano y no aparecen en esta vista."
+        )
+    elif cobertura["excluidos_por_fecha"]:
+        medidos.append(
+            f"El rango de anos deja fuera {cobertura['excluidos_por_fecha']} de "
+            f"{universo} documentos, incluidos todos los que no declaran fecha."
+        )
+    aviso = " ".join([*medidos, vista.nota]).strip()
+
+    return JSONResponse(
+        content={
+            "disponible": True,
+            "chart": vista.chart,
+            "titulo": vista.titulo,
+            "metrica": vista.metrica,
+            "group_by": group_by,
+            "fenomenos": list(vista.fenomenos),
+            "filas": filas,
+            "total": datos["total"],
+            "cobertura": cobertura,
+            "aviso": aviso,
+        }
+    )
+
+
 @router.get("/geo")
 def geo() -> JSONResponse:
     """Datos geograficos. **No disponibles, y es un hecho del corpus.**
@@ -198,9 +289,20 @@ def evidence(chunk_id: str) -> JSONResponse:
 def trace(trace_id: str) -> JSONResponse:
     """Arbol de ejecucion de un turno: que se llamo, con que y cuanto tardo.
 
-    Se conservan las ultimas trazas en memoria. Sirve para explicar una
-    respuesta rara **despues** de que ocurrio, que es cuando siempre hace falta.
+    **Cerrado salvo que `ARPIA_DEBUG_TRACE` este activo.** La traza contiene el
+    texto de la pregunta del usuario, los fragmentos recuperados y la salida del
+    modelo. Servir eso sin autenticacion en `agent.*` —el dominio que evalua
+    ADL— es exposicion innecesaria, y el bloque de seguridad incluye analisis
+    estatico de codigo.
+
+    El `trace_id` es un uuid4 y no se puede adivinar, y no hay forma de
+    enumerar las trazas por HTTP; pero "no se puede adivinar" no es un control
+    de acceso. En desarrollo se enciende con la variable y sirve para explicar
+    una respuesta rara despues de que ocurrio.
     """
+    if not get_settings().debug_trace:
+        return _error("la traza no se publica en este despliegue (ARPIA_DEBUG_TRACE)")
+
     spans = tracing.get_trace(trace_id)
     if spans is None:
         return _error("traza no disponible (solo se conservan las mas recientes)")
