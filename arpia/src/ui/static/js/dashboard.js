@@ -30,6 +30,7 @@ import {
 } from "./viewspec.js";
 import { conIdioma, mensajeError, montarSelector, t } from "./i18n.js";
 import { capturarGraficas, descargarInforme } from "./informe.js";
+import { filaDePaso, seguirProgreso } from "./progreso.js";
 import { abrirVisor, enlazarReferencias } from "./referencias.js";
 import { conTransicion, paginaLista, suavizarEnlace } from "./transiciones.js";
 
@@ -674,7 +675,7 @@ function sesionId() {
     }
 }
 
-function mostrarRespuesta(datos) {
+function mostrarRespuesta(datos, { pasos = [] } = {}) {
     const caja = $("respuesta");
     caja.replaceChildren();
     for (const parrafo of String(datos.respuesta || t("chat.vacia")).split(/\n\s*\n/)) {
@@ -685,6 +686,18 @@ function mostrarRespuesta(datos) {
     for (const a of md.agentes_invocados || []) meta.append(el("span", "chip-agente", t(`agente.${a}`)));
     meta.append(el("span", "mono", `${fmt.format(md.tokens?.total || 0)} tokens · ${fmt.format(md.latencia_ms || 0)} ms`));
     caja.append(meta);
+
+    // Las interacciones de los agentes en este turno (las mismas que se vieron en vivo): quedan
+    // a mano, plegadas, como traza de como se llego a la respuesta.
+    if (pasos.length) {
+        const detalle = el("details", "interacciones");
+        const total = pasos.reduce((s, p) => s + p.duracion_ms, 0);
+        detalle.append(el("summary", null, t("tablero.interacciones", { n: pasos.length, ms: fmt.format(Math.round(total)) })));
+        const lista = el("ul", "progreso-pasos");
+        for (const p of pasos) lista.append(filaDePaso(p.nombre, p.duracion_ms));
+        detalle.append(lista);
+        caja.append(detalle);
+    }
 
     // Hallazgos del compositor: lo que las cifras de la vista dicen, calculado
     // sin modelo. Van debajo de la respuesta y antes de la procedencia porque
@@ -743,10 +756,13 @@ async function preguntar(texto) {
     $("enviar").disabled = true;
     $("pensando").classList.add("activo");
     $("respuesta").replaceChildren(el("p", null, t("tablero.ia.procesando")));
+    // Cronometro y pasos de los agentes en vivo, como en el modulo de chat.
+    const seguimiento = seguirProgreso($("respuesta"), sesionId());
 
     try {
         const datos = await enviarChat(limpio, sesionId());
-        mostrarRespuesta(datos);
+        const pasos = await seguimiento.finalizar();
+        mostrarRespuesta(datos, { pasos });
         mostrarCitas(datos.citations);
         marcarModo(datos.mode);
         await aplicarVistas(vistasDeRespuesta(datos));
@@ -754,6 +770,7 @@ async function preguntar(texto) {
         console.error(err);
         $("respuesta").replaceChildren(el("p", null, mensajeError(err)));
     } finally {
+        seguimiento.detener();
         estado.ocupado = false;
         $("enviar").disabled = false;
         $("pensando").classList.remove("activo");
