@@ -18,7 +18,7 @@
     font-style: normal;
     font-weight: 400;
     font-display: swap;
-    src: url("/static/fonts/inter/Inter-Regular.woff2") format("woff2");
+    src: url("../fonts/inter/Inter-Regular.woff2") format("woff2");
 }
 
 @font-face {
@@ -26,7 +26,7 @@
     font-style: normal;
     font-weight: 600;
     font-display: swap;
-    src: url("/static/fonts/inter/Inter-SemiBold.woff2") format("woff2");
+    src: url("../fonts/inter/Inter-SemiBold.woff2") format("woff2");
 }
 
 @font-face {
@@ -34,7 +34,7 @@
     font-style: normal;
     font-weight: 700;
     font-display: swap;
-    src: url("/static/fonts/inter/Inter-Bold.woff2") format("woff2");
+    src: url("../fonts/inter/Inter-Bold.woff2") format("woff2");
 }
 
 @font-face {
@@ -42,7 +42,7 @@
     font-style: normal;
     font-weight: 400;
     font-display: swap;
-    src: url("/static/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2");
+    src: url("../fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2");
 }
 
 @font-face {
@@ -50,7 +50,7 @@
     font-style: normal;
     font-weight: 700;
     font-display: swap;
-    src: url("/static/fonts/jetbrains-mono/JetBrainsMono-Bold.woff2") format("woff2");
+    src: url("../fonts/jetbrains-mono/JetBrainsMono-Bold.woff2") format("woff2");
 }
 
 :root {
@@ -223,7 +223,7 @@ a {
     flex-shrink: 0;
     position: absolute;
     left: 0;
-    top: 15px;
+    top: 18px;
     z-index: 1;
 }
 
@@ -242,18 +242,20 @@ a {
 .marca-sub {
     width: 300px;
     height: 60px;
+    font-size: 15px;
     object-fit: contain;
     display: block;
     flex-shrink: 0;
     position: absolute;
     left: 300px;
-    top: 20px;
+    top: 18px;
     z-index: 3;
 }
 
 .marca-tablero{
     width: 300px;
-    height: 60px;
+    height: 70px;
+    font-size: 18px;
     object-fit: contain;
     display: block;
     flex-shrink: 0;
@@ -806,3 +808,63 @@ a {
 }
 
 
+
+/* =========================
+   SELECTOR DE IDIOMA (banderas)
+   =========================
+ * Lo monta i18n.js en la barra superior. La bandera acompana a la sigla ES/EN:
+ * el idioma no depende solo del color de la bandera.
+ */
+
+.selector-idioma {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    background: var(--arpia-surface);
+    border: 1px solid var(--arpia-border);
+    border-radius: var(--radio);
+}
+
+.bandera {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 28px;
+    padding: 0 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radio-sm);
+    color: var(--arpia-text-muted);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: background var(--transicion), color var(--transicion), border-color var(--transicion);
+}
+
+.bandera img {
+    display: block;
+    width: 20px;
+    height: 14px;
+    border-radius: 2px;
+    object-fit: cover;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--arpia-text) 18%, transparent);
+    opacity: 0.55;
+    transition: opacity var(--transicion);
+}
+
+.bandera:hover {
+    color: var(--arpia-text);
+}
+
+.bandera:hover img,
+.bandera[aria-pressed="true"] img {
+    opacity: 1;
+}
+
+.bandera[aria-pressed="true"] {
+    background: var(--arpia-elevated);
+    border-color: var(--arpia-border-active);
+    color: var(--arpia-text);
+}

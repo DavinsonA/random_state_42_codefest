@@ -50,7 +50,31 @@ def test_el_tablero_no_depende_de_un_servidor_de_mapas_externo():
 
 
 def test_el_tablero_abre_con_las_vistas_del_corpus():
-    """Al abrir, los paneles con datos se llenan desde el backend, no desde constantes."""
+    """Al abrir, los paneles con datos se llenan desde el backend, no desde constantes.
+
+    La comprobacion mira la INTENCION, no una firma concreta: el tablero pasa
+    las dos vistas iniciales por el mismo camino que usa para las vistas que
+    pide el agente (`vistaDelAgente` -> `cargar` -> `/api/aggregate`). Mientras
+    ese camino sea el unico, los paneles no pueden abrirse con constantes
+    aunque cambie la forma de invocarlo.
+    """
     js = (STATIC / "js" / "dashboard.js").read_text("utf-8")
     assert "VISTA_TIEMPO_INICIAL" in js and "VISTA_INICIAL" in js
-    assert "inicial: true" in js
+
+    inicio = js.index("async function vistasIniciales(")
+    cuerpo = js[inicio : js.index("\n}", inicio)]
+    assert "vistaDelAgente" in cuerpo, "las vistas iniciales no pasan por el backend"
+    assert "VISTA_TIEMPO_INICIAL" in cuerpo and "VISTA_INICIAL" in cuerpo
+
+
+def test_los_paneles_sin_dato_declaran_por_que_y_no_dibujan_nada():
+    """Un panel que dice "no hay este dato y por que" es informacion; uno con
+    marcadores que nadie extrajo del corpus es una afirmacion falsa."""
+    js = (STATIC / "js" / "dashboard.js").read_text("utf-8")
+    for funcion in ("vistaMapaSinDato", "vistaRelacionesSinDato"):
+        inicio = js.index(f"function {funcion}(")
+        cuerpo = js[inicio : js.index("\n}", inicio)]
+        assert 'origen: "sin_datos"' in cuerpo, funcion
+        assert "mensaje(" in cuerpo, f"{funcion} deberia mostrar texto, no dibujar datos"
+    # El motivo del mapa lo da el backend, no una cadena escrita a mano.
+    assert "obtenerGeo()" in js

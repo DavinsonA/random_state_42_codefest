@@ -67,12 +67,24 @@ def test_el_progreso_no_usa_colores_fuera_de_los_tokens():
     assert not re.search(r"#[0-9a-fA-F]{3,8}\b", bloque), "hexadecimal suelto en el progreso"
 
 
+#: Lo que parece una URL y no es una carga de red.
+#:
+#: `w3.org/2000/svg` es el namespace XML que exige `createElementNS`, no una
+#: descarga; `localhost` son las direcciones de desarrollo que la interfaz
+#: reconoce para ofrecer el enlace al tablero. Ninguna sale a internet en el
+#: despliegue, que es lo que esta prueba protege.
+_NO_SON_CARGAS = ("w3.org/2000/svg", "localhost")
+
+
 def test_no_se_anaden_cargas_externas():
     """El contenedor sirve todo; una CDN nueva es una dependencia de red en la
-    ventana de evaluacion."""
+    ventana de evaluacion. Lo descubrio de verdad: el tablero cargaba tiles de
+    `tile.openstreetmap.org` para un mapa que el corpus no puede sostener."""
     for archivo in (STATIC / "js").glob("*.js"):
         texto = archivo.read_text(encoding="utf-8")
         for url in re.findall(r"https?://[^\s\"')]+", texto):
+            if any(permitida in url for permitida in _NO_SON_CARGAS):
+                continue
             pytest.fail(f"URL externa en {archivo.name}: {url}")
 
 

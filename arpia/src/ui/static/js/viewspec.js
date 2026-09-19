@@ -4,36 +4,27 @@
 // Lo que no se reconozca se descarta, nunca se interpreta.
 
 import { ApiError, obtenerAgregado } from "./api.js";
+import { mensajeError, t } from "./i18n.js";
 
-export const FENOMENOS = {
-    F1: "IA y Capacidades Estratégicas",
-    F2: "Seguridad del Entorno Espacial",
-    F3: "Dinámicas Territoriales",
-};
+/** Objeto cuyos valores se leen del idioma activo en cada acceso (getters). */
+function traducible(prefijo, claves) {
+    const obj = {};
+    for (const k of claves) Object.defineProperty(obj, k, { get: () => t(`${prefijo}.${k}`), enumerable: true });
+    return Object.freeze(obj);
+}
+
+export const FENOMENOS = traducible("fenomeno", ["F1", "F2", "F3"]);
 
 export const CHARTS = ["timeline", "bar", "stacked_bar", "donut", "table", "kpi"];
 export const GROUP_BY = ["fenomeno", "organizacion", "fuente", "formato", "anio"];
 export const METRICAS = ["conteo_documentos", "conteo_fragmentos"];
 const FENS = ["F1", "F2", "F3"];
 
-export const NOMBRE_CHART = {
-    timeline: "Serie anual",
-    bar: "Barras",
-    stacked_bar: "Barras apiladas por fenómeno",
-    donut: "Composición por fenómeno",
-    table: "Tabla",
-    kpi: "Indicador",
-};
+export const NOMBRE_CHART = traducible("chart", ["timeline", "bar", "stacked_bar", "donut", "table", "kpi"]);
 
-export const NOMBRE_GROUP_BY = {
-    fenomeno: "fenómeno",
-    organizacion: "organización",
-    fuente: "fuente",
-    formato: "formato",
-    anio: "año",
-};
+export const NOMBRE_GROUP_BY = traducible("grupo", ["fenomeno", "organizacion", "fuente", "formato", "anio"]);
 
-const NOMBRE_METRICA = { conteo_documentos: "documentos", conteo_fragmentos: "fragmentos" };
+const NOMBRE_METRICA = traducible("metrica", ["conteo_documentos", "conteo_fragmentos"]);
 
 /** Vista con la que abre el tablero si no llega ninguna. */
 export const VISTA_INICIAL = {
@@ -81,10 +72,39 @@ export function vistaDesdeHash() {
     }
 }
 
+/** Tope de graficos por respuesta: mas de esto deja de ser legible. */
+export const MAX_VISTAS = 6;
+
+/**
+ * Vistas que trae una respuesta de /chat, ya normalizadas.
+ *
+ * El contrato actual (src/api/contracts.py) solo tiene `view_spec` (una).
+ * Se acepta tambien `view_specs` (lista) para cuando el backend lo exponga:
+ * el tablero ya sabe repartir N graficos. Lo invalido se descarta.
+ */
+export function vistasDeRespuesta(datos) {
+    const crudas = Array.isArray(datos?.view_specs) && datos.view_specs.length
+        ? datos.view_specs
+        : [datos?.view_spec];
+    return crudas.map(normalizar).filter(Boolean).slice(0, MAX_VISTAS);
+}
+
+/** `#vistas=[...]` o `#vista={...}` en la URL (enlace desde el chat, pruebas). */
+export function vistasDesdeHash() {
+    const m = window.location.hash.match(/vistas?=([^&]+)/);
+    if (!m) return [];
+    try {
+        const valor = JSON.parse(decodeURIComponent(m[1]));
+        return (Array.isArray(valor) ? valor : [valor]).map(normalizar).filter(Boolean).slice(0, MAX_VISTAS);
+    } catch {
+        return [];
+    }
+}
+
 export function tituloPorDefecto(spec) {
-    const met = NOMBRE_METRICA[spec.metrica] || spec.metrica;
-    if (spec.chart === "kpi") return `Total de ${met}`;
-    return `${met[0].toUpperCase()}${met.slice(1)} por ${NOMBRE_GROUP_BY[spec.group_by] || "grupo"}`;
+    const metrica = NOMBRE_METRICA[spec.metrica] || spec.metrica;
+    if (spec.chart === "kpi") return t("titulo.total", { metrica });
+    return t("titulo.por", { metrica, grupo: NOMBRE_GROUP_BY[spec.group_by] || t("grupo.generico") });
 }
 
 // -- datos -------------------------------------------------------------------
@@ -118,7 +138,7 @@ function datosSimulados(spec) {
         filas,
         total: filas.reduce((s, f) => s + f.valor, 0),
         cobertura: spec.group_by === "anio" ? { con_dato: 622, total: 1826 } : null,
-        nota: "Datos simulados (modo stub): no provienen del corpus.",
+        nota: t("nota.simulado"),
         simulado: true,
     };
 }
@@ -210,9 +230,9 @@ export async function cargar(spec, { modoStub = false } = {}) {
     } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
             if (modoStub) return { datos: datosSimulados(spec) };
-            return { error: "El servicio no expone los datos del tablero (/api/aggregate)." };
+            return { error: t("error.sin_datos_tablero") };
         }
-        return { error: err.message || "No se pudieron cargar los datos de la vista." };
+        return { error: err instanceof ApiError ? mensajeError(err) : t("error.datos") };
     }
 }
 

@@ -10,11 +10,14 @@ const TIMEOUT_CHAT_MS = 90000;  // el grafo puede tardar; REQUEST_TIMEOUT_S del 
 const TIMEOUT_CORTO_MS = 8000;
 
 export class ApiError extends Error {
-    constructor(mensaje, { status = 0, causa = null } = {}) {
+    // `codigo` permite a la interfaz mostrar el mensaje en su idioma (i18n.js,
+    // claves "error.<codigo>"); `mensaje` queda como texto por defecto.
+    constructor(mensaje, { status = 0, causa = null, codigo = "inesperado" } = {}) {
         super(mensaje);
         this.name = "ApiError";
         this.status = status;
         this.causa = causa;
+        this.codigo = codigo;
     }
 }
 
@@ -32,24 +35,40 @@ async function pedir(ruta, { method = "GET", body, timeoutMs = TIMEOUT_CORTO_MS 
         });
     } catch (err) {
         if (err.name === "AbortError") {
-            throw new ApiError("El servicio tardó demasiado en responder. Intenta de nuevo.", { causa: err });
+            throw new ApiError("El servicio tardó demasiado en responder. Intenta de nuevo.", { causa: err, codigo: "timeout" });
         }
-        throw new ApiError("No se pudo conectar con el servicio.", { causa: err });
+        throw new ApiError("No se pudo conectar con el servicio.", { causa: err, codigo: "red" });
     } finally {
         clearTimeout(reloj);
+    }
+
+    // Un servidor que no es el backend (Live Server, file://) responde HTML, no
+    // JSON: la pagina se abrio fuera de A.R.P.I.A. y no hay API detras.
+    // `?.` no es paranoia: un `Response` siempre trae cabeceras, pero los dobles
+    // de las pruebas no, y reventar aqui convertiria un error del servicio en un
+    // TypeError que el catch de `cargar()` reporta como "no se pudieron cargar
+    // los datos" —escondiendo el motivo real que el backend si habia enviado—.
+    const tipo = res.headers?.get("content-type") ?? "";
+    if (tipo && !tipo.includes("json")) {
+        throw new ApiError(
+            "Esta página no está conectada al backend de A.R.P.I.A. (se abrió desde otro servidor, " +
+            "p. ej. Live Server). Con el backend encendido, ábrela en http://localhost:8765/ " +
+            "(chat) o http://dashboard.localhost:8765/ (tablero).",
+            { status: res.status, codigo: "sin_backend" },
+        );
     }
 
     let datos;
     try {
         datos = await res.json();
     } catch (err) {
-        throw new ApiError(`Respuesta ilegible del servicio (HTTP ${res.status}).`, { status: res.status, causa: err });
+        throw new ApiError(`Respuesta ilegible del servicio (HTTP ${res.status}).`, { status: res.status, causa: err, codigo: "ilegible" });
     }
 
     // /health responde 503 con cuerpo valido cuando nada funciona: se entrega
     // el cuerpo para que la interfaz muestre el estado, no un error generico.
     if (!res.ok && !(ruta === "/health" && datos && datos.status)) {
-        throw new ApiError(`El servicio respondió con error (HTTP ${res.status}).`, { status: res.status });
+        throw new ApiError(`El servicio respondió con error (HTTP ${res.status}).`, { status: res.status, codigo: "http" });
     }
     return datos;
 }
