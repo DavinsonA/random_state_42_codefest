@@ -12,11 +12,13 @@ fija el coste del turno en dos llamadas: planificar y redactar.
 
 from __future__ import annotations
 
-from typing import Literal
+import re
+import unicodedata
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.api.contracts import Fenomeno
+from src.api.contracts import Fenomeno, GroupBy
 
 #: Agentes que el orquestador puede invocar. Coinciden con los ids de
 #: `agent_card.json`: lo que no esta en la card no se puede planificar.
@@ -31,10 +33,33 @@ MAX_PASOS = 3
 MAX_REPLANES = 1
 
 
+def _claves_en_minuscula(datos: Any) -> Any:
+    """Normaliza las claves del JSON del modelo: `Pasos` -> `pasos`.
+
+    El esquema que se envia al modelo lleva un `title` por campo ("Pasos",
+    "Group By"...) y `gpt-oss-120b` a veces lo devuelve como clave. Con
+    `extra="forbid"` eso tumbaba el plan entero. El esquema sigue cerrado: solo se
+    tolera la capitalizacion, no campos que no existan.
+    """
+    if not isinstance(datos, dict):
+        return datos
+    normalizado: dict[str, Any] = {}
+    for clave, valor in datos.items():
+        limpia = str(clave).strip().lower().replace(" ", "_")
+        if limpia not in normalizado or clave == limpia:
+            normalizado[limpia] = valor
+    return normalizado
+
+
 class Paso(BaseModel):
     """Una delegacion a un agente especializado."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _claves(cls, datos: Any) -> Any:
+        return _claves_en_minuscula(datos)
 
     agente: AgenteEjecutor
     consulta: str = Field(
@@ -44,12 +69,24 @@ class Paso(BaseModel):
     fenomeno: Fenomeno | None = Field(
         None, description="Filtro por fenomeno si la pregunta lo acota. None = los tres."
     )
+    group_by: GroupBy | None = Field(
+        None,
+        description=(
+            "Solo para `agente_analitico`: por que dimension agrupar el conteo. "
+            "Una de: fenomeno, organizacion, fuente, formato, anio."
+        ),
+    )
 
 
 class Plan(BaseModel):
     """Lo que el orquestador decide en su unica llamada al modelo."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _claves(cls, datos: Any) -> Any:
+        return _claves_en_minuscula(datos)
 
     razonamiento: str = Field(
         "",
@@ -76,15 +113,42 @@ class Plan(BaseModel):
         return vistos
 
 
+def _sin_tildes(texto: str) -> str:
+    descompuesto = unicodedata.normalize("NFD", texto.lower())
+    return "".join(c for c in descompuesto if unicodedata.category(c) != "Mn")
+
+
+#: Pregunta de conteo inequivoca: una palabra de cantidad Y una unidad del corpus
+#: (o una dimension). "Cuantos satelites lanzo China" NO entra: es de contenido.
+_CANTIDAD = re.compile(r"\b(cuantos|cuantas|cantidad|numero|conteo|distribucion|total)\b")
+_UNIDAD = re.compile(
+    r"\b(documentos?|fragmentos?|registros?|publicaciones|"
+    r"por (fenomeno|organizacion|fuente|formato|ano))\b"
+)
+_VISTA = re.compile(r"\b(grafic\w*|visualiz\w*|dibuj\w*|tablero|dashboard|diagrama)\b")
+
+
 def plan_de_respaldo(pregunta: str) -> Plan:
     """Plan determinista para cuando el modelo no devuelve uno valido.
 
     No es un caso raro que haya que tolerar: es la garantia de que un fallo del
-    gateway o una salida malformada degraden a una busqueda documental util en
-    vez de a una disculpa. Cuesta cero tokens.
+    gateway o una salida malformada degraden a algo util en vez de a una
+    disculpa. Cuesta cero tokens.
+
+    Por defecto va al documental. Una pregunta de conteo inequivoca va al
+    analitico: contestarla con busqueda semantica produce "no se proporciona un
+    numero" cuando el conteo exacto existe. Si ademas pide una grafica, se suma el
+    visualizador.
     """
+    bajo = _sin_tildes(pregunta)
+    es_conteo = bool(_CANTIDAD.search(bajo) and _UNIDAD.search(bajo)) or "distribucion" in bajo
+    pasos = [
+        Paso(agente="agente_analitico" if es_conteo else "agente_documental", consulta=pregunta)
+    ]
+    if _VISTA.search(bajo):
+        pasos.append(Paso(agente="agente_visualizador", consulta=pregunta))
     return Plan(
         razonamiento="plan de respaldo: el orquestador no produjo un plan valido",
-        pasos=[Paso(agente="agente_documental", consulta=pregunta)],
-        paralelo=False,
+        pasos=pasos,
+        paralelo=len(pasos) > 1,
     )

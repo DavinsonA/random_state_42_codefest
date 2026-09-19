@@ -67,3 +67,69 @@ export function enviarChat(texto, sesionId) {
 export function obtenerSalud() {
     return pedir("/health");
 }
+
+/** GET /api/evidence/{chunk_id} — el fragmento exacto detras de una cita.
+ *
+ * Responde 200 siempre: `{ disponible: false, motivo }` si no existe.
+ */
+export function obtenerEvidencia(chunkId) {
+    return pedir(`/api/evidence/${encodeURIComponent(chunkId)}`);
+}
+
+/** GET /api/document/{doc_id} — el documento reconstruido con fragmentos vecinos.
+ *
+ * `chunkId` centra la ventana en el fragmento citado y lo marca `citado`;
+ * `posicion` es un centro alternativo (para paginar); `ventana` son los
+ * fragmentos a cada lado (el backend la limita a 0..10).
+ * Devuelve `{ disponible, doc_id, formato, fuente, total_fragmentos, desde, hasta,
+ * hay_anterior, hay_siguiente, fragmentos: [{ chunk_id, posicion, texto, truncado,
+ * citado }] }`, o `{ disponible: false, motivo }`.
+ */
+export function obtenerDocumento(docId, { chunkId, posicion, ventana } = {}) {
+    const q = new URLSearchParams();
+    if (chunkId) q.set("chunk_id", chunkId);
+    if (posicion !== undefined && posicion !== null) q.set("posicion", String(posicion));
+    if (ventana !== undefined && ventana !== null) q.set("ventana", String(ventana));
+    const consulta = q.toString();
+    return pedir(`/api/document/${encodeURIComponent(docId)}${consulta ? `?${consulta}` : ""}`);
+}
+
+/** GET /api/progress?sesion= — pasos ya completados del turno en curso.
+ *
+ * Responde 200 siempre: `{ disponible: false, motivo, pasos: [] }` cuando no
+ * hay turno. Cada paso trae solo `{ span_id, parent_id, tipo, nombre,
+ * duracion_ms }`; nunca el contenido de la pregunta ni de los fragmentos, que
+ * es lo que mantiene este endpoint publicable (ver src/api/dashboard.py).
+ *
+ * Timeout corto a proposito: es un adorno informativo y no puede competir por
+ * la conexion con el turno que esta describiendo.
+ */
+export function obtenerProgreso(sesionId) {
+    return pedir(`/api/progress?sesion=${encodeURIComponent(sesionId)}`, { timeoutMs: 4000 });
+}
+
+/** GET /api/geo — el corpus no trae lugar; responde `{ disponible: false, motivo, alternativa }`. */
+export function obtenerGeo() {
+    return pedir("/api/geo");
+}
+
+/** GET /api/aggregate — datos de una vista del tablero. Responde 200 siempre.
+ *
+ * Forma real del backend (src/api/dashboard.py):
+ *   { disponible, group_by, metrica, total,
+ *     filas: [{ clave, valor, doc_ids: [...] }],
+ *     cobertura: { documentos_universo, documentos_en_dimension, documentos_contados,
+ *                  sin_dato_en_la_dimension, excluidos_por_fecha } }
+ * o `{ disponible: false, motivo }` si el indice no esta. Ninguna fila trae el
+ * fenomeno: quien lo necesite pide una vez por fenomeno (`fenomenos`).
+ * `viewspec.js` traduce esta forma a la que usan los graficos.
+ */
+export function obtenerAgregado({ metrica, group_by, fenomenos, desde, hasta }) {
+    const q = new URLSearchParams();
+    if (metrica) q.set("metrica", metrica);
+    if (group_by) q.set("group_by", group_by);
+    if (fenomenos && fenomenos.length) q.set("fenomenos", fenomenos.join(","));
+    if (desde) q.set("desde", desde);
+    if (hasta) q.set("hasta", hasta);
+    return pedir(`/api/aggregate?${q.toString()}`);
+}

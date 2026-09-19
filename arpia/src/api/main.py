@@ -37,20 +37,43 @@ from src.tools.registry import registry
 log = get_logger(__name__)
 
 
+def _precalentar() -> None:
+    """Deja indice, tabla y encoder listos antes de la primera peticion.
+
+    El indice son 1,3 GB y la primera carga puede superar los 5 s del
+    healthcheck: si eso ocurre dentro de `/health`, Coolify puede marcar el
+    despliegue como fallido cuando en realidad solo estaba cargando. Y si la
+    primera peticion del evaluador es la que paga la carga, se le cobra como
+    latencia.
+
+    Orden deliberado: primero el indice y la tabla, que es lo que hace util al
+    servicio; el encoder al final porque es lo que mas tarda (~90 s) y solo lo
+    necesitan la busqueda y el cache semantico.
+    """
+    from src.retrieval import aggregates
+
+    try:
+        ok, err = _check_index()
+        log.info("precalentado: indice=%s%s", ok, f" ({err})" if err else "")
+        if ok:
+            log.info("precalentado: tabla de %s documentos", len(aggregates.tabla()))
+    except Exception as exc:  # noqa: BLE001 - el arranque nunca falla por esto
+        log.warning("no se pudo precalentar el indice: %s", exc)
+    encoder.warmup()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Calienta el encoder local al arrancar, en segundo plano.
+    """Calienta indice, tabla y encoder al arrancar, en segundo plano.
 
-    La primera carga de bge-m3 descarga ~2 GB y tarda ~90 s. Si eso ocurre
-    dentro de la peticion de un evaluador, se le cobra como latencia —o se cae
-    por timeout—. Aqui se paga una vez, mientras el contenedor arranca, y en un
-    hilo aparte para que `/health` responda de inmediato: Coolify necesita saber
-    que el servicio esta vivo antes de que el modelo termine de cargar.
+    Todo lo caro se paga una vez, al arrancar, y en un hilo aparte para que
+    `/health` responda de inmediato: Coolify necesita saber que el servicio esta
+    vivo antes de que el modelo termine de cargar.
 
     En modo stub no se carga nada: no hay nada real que codificar.
     """
     if not get_settings().is_stub:
-        threading.Thread(target=encoder.warmup, name="encoder-warmup", daemon=True).start()
+        threading.Thread(target=_precalentar, name="warmup", daemon=True).start()
     yield
 
 
@@ -58,6 +81,20 @@ app = FastAPI(title="A.R.P.I.A.", version="0.1.0", lifespan=lifespan)
 
 
 # -- helpers de estado ------------------------------------------------------
+
+
+def _max_llamadas_por_turno() -> int:
+    """Peor caso de llamadas al modelo en un turno, desde los topes reales.
+
+    `MAX_AGENT_ITERATIONS` quedo muerto al reemplazar el bucle ReAct por el
+    orquestador de plan unico: nadie lo aplicaba y `/health` lo seguia
+    reportando, que es peor que no reportar nada. Los topes de verdad son el
+    numero de replanificaciones y los agentes que gastan por turno.
+    """
+    from src.agents.plan import MAX_REPLANES
+
+    planes = 1 + MAX_REPLANES
+    return planes + 1 + 1 + 1  # planes + redaccion + view_spec + verificador
 
 
 def _check_index() -> tuple[bool, str | None]:
@@ -171,6 +208,8 @@ def health(response: Response) -> HealthResponse:
     if not tools:
         warnings.append("no hay tools registradas")
 
+    if s.debug_trace:
+        warnings.append("ARPIA_DEBUG_TRACE activo: /api/trace publica el contenido de los turnos")
     if s.is_stub:
         warnings.append("modo stub: las respuestas son simuladas, NO aptas para evaluacion")
         status = "degraded"
@@ -186,10 +225,11 @@ def health(response: Response) -> HealthResponse:
         status=status,  # type: ignore[arg-type]
         version=app.version,
         mode=s.arpia_mode,  # type: ignore[arg-type]
-        max_iterations=s.max_agent_iterations,
+        max_llamadas_por_turno=_max_llamadas_por_turno(),
         index_loaded=index_loaded,
         gateway_reachable=gateway_reachable,
         agent_card_loaded=card_loaded,
+        debug_trace=s.debug_trace,
         memoria_persistente=checkpoint.es_persistente(),
         encoder_listo=encoder.loaded(),
         agentes_registrados=agent_ids(),

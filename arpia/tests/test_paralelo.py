@@ -81,7 +81,9 @@ def _plan(paralelo: bool) -> dict:
 def test_el_registro_del_turno_es_igual_en_secuencial_y_en_paralelo(turno, paralelo):
     graph.ejecutar({"plan": _plan(paralelo)})
 
-    assert sorted(c["input_parameters"]["query"] for c in turnlog.tool_calls()) == [
+    assert sorted(
+        c["input_parameters"]["query"] for c in turnlog.tool_calls() if c["name"] == "buscar_corpus"
+    ) == [
         "dos",
         "tres",
         "uno",
@@ -121,7 +123,11 @@ def test_dos_turnos_simultaneos_no_mezclan_su_registro(monkeypatch):
         ).model_dump()
         barrera.wait(timeout=5)  # ambos turnos estan dentro de ejecutar a la vez
         graph.ejecutar({"plan": plan})
-        return sorted(c["input_parameters"]["query"] for c in turnlog.tool_calls())
+        return sorted(
+            c["input_parameters"]["query"]
+            for c in turnlog.tool_calls()
+            if c["name"] == "buscar_corpus"
+        )
 
     with ThreadPoolExecutor(2) as pool:
         # cada turno corre en su propio hilo, con su propio contexto

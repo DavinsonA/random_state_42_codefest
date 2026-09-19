@@ -163,12 +163,20 @@ class Citation(BaseModel):
     `RETO.md` §Restricciones duras: todo dato mostrado debe rastrearse a su
     `doc_id` y su `chunk_id`. Este es el campo que el tablero usa para abrir la
     evidencia (`GET /api/evidence/{chunk_id}`).
+
+    Los campos opcionales de abajo alimentan el tooltip de una referencia
+    ("CSIS · 2019 · pdf · fragmento 12 de 87") sin otra peticion. Son opcionales
+    porque no toda cita los tiene (una cifra agregada, el modo stub).
     """
 
     doc_id: str
     chunk_id: str
     fuente: str | None = None
     fragmento: str = Field("", description="Texto citado, recortado.")
+    formato: str | None = Field(None, description="pdf, csv, json, xlsx, jpg, pbf, txt...")
+    posicion: int | None = Field(None, description="Posicion del fragmento en su documento (0).")
+    total_fragmentos: int | None = Field(None, description="Fragmentos del documento.")
+    anio: int | None = Field(None, description="Ano, solo si el documento lo declara.")
 
 
 class ViewSpec(BaseModel):
@@ -185,6 +193,35 @@ class ViewSpec(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalizar_claves(cls, datos: Any) -> Any:
+        """Tolera la capitalizacion del esquema en la salida del modelo.
+
+        Medido contra el gateway real: `gpt-oss-20b` devuelve `{"Chart": ...,
+        "Group By": ...}` —los `title` que pydantic pone en el JSON Schema que
+        se le envia— en parte de las respuestas. Con `extra="forbid"` eso no es
+        un campo mal escrito sino uno DESCONOCIDO, y tumbaba la vista entera:
+        cinco errores de validacion, `view_spec: null`, y una pregunta que pedia
+        una grafica respondida sin grafica.
+
+        El esquema sigue cerrado: una clave que no exista sigue siendo un error.
+        Solo se absorbe una variacion de formato, que es lo que era.
+
+        `src/agents/plan.py` lleva el gemelo de esto para `Plan`. Estan
+        separados a proposito por ahora: `plan.py` importa de este modulo, asi
+        que compartir el helper exigiria moverlo aqui y tocar un archivo que
+        otra sesion esta editando.
+        """
+        if not isinstance(datos, dict):
+            return datos
+        normalizado: dict[str, Any] = {}
+        for clave, valor in datos.items():
+            limpia = str(clave).strip().lower().replace(" ", "_")
+            if limpia not in normalizado or clave == limpia:
+                normalizado[limpia] = valor
+        return normalizado
 
     chart: ChartType
     metrica: Metrica = "conteo_documentos"
@@ -230,23 +267,6 @@ ChatResponse = AgentResponse
 TokenCount = Tokens
 
 
-# -- GET /topics (uso interno del frontend; no lo evalua ADL) ---------------
-
-
-class Topic(BaseModel):
-    id: str
-    nombre: str
-    descripcion: str
-    num_documentos: int | None = Field(
-        None, description="Conteo real sobre la metadata; None si no se calculo."
-    )
-    preguntas_ejemplo: list[str] = Field(default_factory=list)
-
-
-class TopicsResponse(BaseModel):
-    topics: list[Topic]
-
-
 # -- operacion -------------------------------------------------------------
 
 
@@ -260,10 +280,20 @@ class HealthResponse(BaseModel):
     status: Literal["ok", "degraded", "down"]
     version: str
     mode: Mode
-    max_iterations: int
+    max_llamadas_por_turno: int = Field(
+        0,
+        description=(
+            "Peor caso de llamadas al modelo en un turno, calculado desde los topes "
+            "reales del grafo. Acotado por construccion: el Bloque B se normaliza "
+            "contra los otros equipos."
+        ),
+    )
     index_loaded: bool
     gateway_reachable: bool
     agent_card_loaded: bool
+    debug_trace: bool = Field(
+        False, description="GET /api/trace publica entradas y salidas de los turnos."
+    )
     memoria_persistente: bool = Field(
         False,
         description=(

@@ -113,6 +113,14 @@ def check_tokens() -> list[str]:
     return errs
 
 
+#: Nombres que cuentan como tope de iteraciones. `max_agent_iterations` y
+#: `max_iterations` son los del bucle ReAct original; `max_pasos` y
+#: `max_replanes` los del orquestador de plan unico que lo reemplazo. Se
+#: aceptan los cuatro: lo que importa es que el coste del turno este acotado,
+#: no como se llame la constante que lo acota.
+TOPES_CONOCIDOS = ("max_agent_iterations", "max_iterations", "max_pasos", "max_replanes")
+
+
 def check_iteration_caps() -> list[str]:
     """Todo modulo de agentes debe referenciar un tope de iteraciones."""
     agents_dir = ROOT / "src" / "agents"
@@ -120,8 +128,8 @@ def check_iteration_caps() -> list[str]:
         return []
     joined = "\n".join(
         p.read_text("utf-8", errors="ignore") for p in agents_dir.rglob("*.py")
-    )
-    if "max_agent_iterations" not in joined and "max_iterations" not in joined:
+    ).lower()
+    if not any(t in joined for t in TOPES_CONOCIDOS):
         return ["src/agents/ no referencia ningun tope de iteraciones (AGENTS.md §8)"]
     return []
 

@@ -34,21 +34,38 @@ _lock = threading.Lock()
 
 
 def tabla() -> list[dict[str, Any]]:
-    """Tabla de documentos, cacheada. Lista vacia si el indice no esta."""
+    """Tabla de documentos, cacheada. Lista vacia si el indice no esta.
+
+    **El fallo no se cachea.** Si el volumen del indice aun no esta montado
+    cuando llega la primera peticion, cachear la lista vacia dejaria el tablero
+    en blanco hasta reiniciar el contenedor, respondiendo 200 y sin un solo
+    aviso. Paso exactamente eso esta noche con una ruta mal configurada:
+    `/api/view` devolvia `total: 0` con el corpus entero en disco.
+    """
     global _tabla
-    if _tabla is not None:
+    if _tabla:
         return _tabla
     with _lock:
-        if _tabla is None:
-            try:
-                from src.tools.corpus import _get_index
+        if _tabla:
+            return _tabla
+        try:
+            from src.tools.corpus import _get_index
 
-                _tabla = _get_index().document_table()
-                log.info("tabla de agregacion: %s documentos", len(_tabla))
-            except Exception as exc:  # noqa: BLE001 - frontera: nunca tumba el turno
-                log.warning("no se pudo construir la tabla de agregacion: %s", exc)
-                _tabla = []
+            filas = _get_index().document_table()
+        except Exception as exc:  # noqa: BLE001 - frontera: nunca tumba el turno
+            log.warning("no se pudo construir la tabla de agregacion: %s", exc)
+            return []
+        if not filas:
+            log.warning("la tabla de agregacion salio vacia; no se cachea")
+            return []
+        _tabla = filas
+        log.info("tabla de agregacion: %s documentos", len(_tabla))
     return _tabla
+
+
+def disponible() -> bool:
+    """True si hay tabla con la que responder. Lo consulta el tablero."""
+    return bool(tabla())
 
 
 def reset() -> None:
@@ -106,13 +123,19 @@ def agregar(
     # un rango de anos descarta en silencio los documentos sin ano, asi que
     # medirla despues daria siempre "0 sin dato" — justo el mensaje tranquilizador
     # y falso que este campo existe para evitar.
-    dimensionado = filas
+    dimensionado = list(filas)
     sin_dato = sum(1 for f in dimensionado if not _valor(f, group_by))
 
     if desde is not None:
         filas = [f for f in filas if f.get("anio") and f["anio"] >= desde]
     if hasta is not None:
         filas = [f for f in filas if f.get("anio") and f["anio"] <= hasta]
+    # Un rango de anos descarta TODO documento sin ano, agrupe por lo que
+    # agrupe. Medido en el corpus: un rango 2005-2026 sobre un conteo por
+    # organizacion deja 621 de 1.826 documentos y hace desaparecer al mayor
+    # publicador, porque ninguno de sus documentos declara ano. Sin este numero
+    # la vista parece completa y no lo es.
+    excluidos_por_fecha = len(dimensionado) - len(filas)
 
     conteos: dict[str, int] = defaultdict(int)
     docs: dict[str, list[str]] = defaultdict(list)
@@ -137,6 +160,7 @@ def agregar(
             "documentos_en_dimension": len(dimensionado),
             "documentos_contados": len(filas),
             "sin_dato_en_la_dimension": sin_dato,
+            "excluidos_por_fecha": excluidos_por_fecha,
         },
     }
 

@@ -29,7 +29,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.agents import guardian, memory
+from src.agents import budget, guardian, memory, voz
 from src.api import stub
 from src.api.contracts import (
     AgentResponse,
@@ -120,8 +120,13 @@ def _build(
     """
     totals = usage.request_usage()
     breakdown = usage.request_breakdown()
+
+    # Los que gastaron tokens, mas los que actuaron sin gastarlos. Derivar esta
+    # lista solo del desglose de tokens dejaba invisible al agente analitico,
+    # que por diseno cuesta cero: un agente que trabaja y no aparece es credito
+    # perdido, y es justo el que da puntos extra.
     agentes = [b["agente"] for b in breakdown]
-    for extra in agentes_extra:
+    for extra in (*turnlog.agentes(), *agentes_extra):
         if extra not in agentes:
             agentes.append(extra)
 
@@ -175,29 +180,19 @@ def _retrieval_fallback(texto: str) -> str:
     procedencia son evidencia real, aunque no esten redactados.
     """
     try:
-        from src.tools.corpus import _get_index
+        from src.tools.corpus import _cita, _get_index
 
         hits = _get_index().search(texto, k=5)
     except Exception as exc:  # noqa: BLE001 - degradacion, nunca 500
         log.warning("recuperacion de respaldo fallo: %s", exc)
-        return "No fue posible procesar la consulta en este momento."
+        return voz.SERVICIO_DEGRADADO
 
     turnlog.add_context([f"({h.citation()}) {h.text}" for h in hits])
-    turnlog.add_citations(
-        [
-            {
-                "doc_id": h.doc_id,
-                "chunk_id": h.chunk_id,
-                "fuente": h.metadata.get("organizacion") or h.metadata.get("fuente"),
-                "fragmento": h.text[:240],
-            }
-            for h in hits
-        ]
-    )
+    turnlog.add_citations([_cita(h.doc_id, h.chunk_id, h.metadata, h.text) for h in hits])
     if not hits:
-        return "No encontre informacion sobre esa consulta en el corpus."
+        return voz.SIN_RESULTADOS
     cuerpo = "\n\n".join(f"[{i}] ({h.citation()}) {h.text[:500]}" for i, h in enumerate(hits, 1))
-    return f"No pude redactar una respuesta con el modelo. Fragmentos mas relevantes:\n\n{cuerpo}"
+    return f"{voz.SIN_REDACCION}\n\n{cuerpo}"
 
 
 def invalid_input_response() -> AgentResponse:
@@ -208,9 +203,7 @@ def invalid_input_response() -> AgentResponse:
     turnlog.start_turn()
     return _build(
         "",
-        "No recibi ninguna consulta. Preguntame sobre inteligencia artificial en "
-        "entornos militares, seguridad del entorno espacial o dinamicas "
-        "territoriales, y te respondo con la evidencia del corpus.",
+        voz.SIN_CONSULTA,
         "error_entrada_invalida",
         start,
     )
@@ -220,12 +213,28 @@ def invalid_input_response() -> AgentResponse:
 
 
 def run_chat(texto: str, session_id: str) -> AgentResponse:
-    """Ejecuta un turno completo. Bloqueante: llamar desde un thread."""
+    """Ejecuta un turno completo. Bloqueante: llamar desde un thread.
+
+    Este envoltorio existe solo para el registro de la sesion, y el `finally`
+    es la razon de separarlo: `_turno` nunca deberia lanzar —esa es su regla
+    dura— pero si algun dia lo hiciera, una sesion que se quedara registrada
+    haria que el panel de progreso mostrara para siempre un turno terminado.
+    Un adorno informativo no puede sobrevivir al turno que describe.
+    """
+    tracing.registrar_sesion(session_id, tracing.start_trace())
+    try:
+        return _turno(texto, session_id)
+    finally:
+        tracing.olvidar_sesion(session_id)
+
+
+def _turno(texto: str, session_id: str) -> AgentResponse:
+    """El turno propiamente dicho. La traza ya esta abierta."""
     start = time.perf_counter()
     s = get_settings()
-    tracing.start_trace()
     usage.start_request()
     turnlog.start_turn()
+    budget.start_turn(s.turn_budget_s)
 
     # 1. Guardian de entrada. Cero tokens.
     veredicto = guardian.revisar_entrada(texto)
@@ -240,7 +249,7 @@ def run_chat(texto: str, session_id: str) -> AgentResponse:
     texto = veredicto.texto
 
     # 2. Memoria. Un acierto ahorra el turno entero.
-    cacheada = memory.cache.buscar(texto)
+    cacheada = memory.cache.buscar(texto, session_id)
     if cacheada is not None:
         cacheada.metadata.latencia_ms = int((time.perf_counter() - start) * 1000)
         return cacheada
@@ -283,7 +292,12 @@ def run_chat(texto: str, session_id: str) -> AgentResponse:
 
     # 5. Memoria: se guarda lo que costo producir. No se cachea un error ni un
     #    rechazo: repetirlos sale gratis y cachearlos congelaria un fallo
-    #    transitorio durante toda la ventana de evaluacion.
-    if not estado.startswith(("error", "rechazado")):
-        memory.cache.guardar(texto, construida)
+    #    transitorio durante toda la ventana de evaluacion. Tampoco un turno
+    #    degradado que termino en `ok` (p. ej. plan de respaldo): el agente lo
+    #    anota en `turnlog` y aqui se respeta.
+    motivo = turnlog.no_cacheable()
+    if motivo:
+        log.info("turno no cacheado: %s", motivo)
+    elif not estado.startswith(("error", "rechazado")):
+        memory.cache.guardar(texto, construida, session_id)
     return construida

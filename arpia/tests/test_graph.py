@@ -21,7 +21,7 @@ from types import SimpleNamespace  # noqa: E402
 import pytest  # noqa: E402
 from langgraph.checkpoint.memory import InMemorySaver  # noqa: E402
 
-from src.agents import executors, graph, orchestrator  # noqa: E402
+from src.agents import executors, graph, orchestrator, voz  # noqa: E402
 from src.agents.plan import Paso, Plan  # noqa: E402
 from src.retrieval import aggregates  # noqa: E402
 from src.retrieval.index import Hit  # noqa: E402
@@ -44,6 +44,8 @@ class FakeLLM:
         self.plan_fijo = plan
         self.texto = texto
         self.llamadas: list[str] = []
+        self.mensajes_plan: list[list[dict]] = []
+        self.mensajes_redaccion: list[list[dict]] = []
         self.fallar_plan = False
         self.fallar_redaccion = False
         self.spec = None  # se construye perezosamente para no importar arriba
@@ -69,6 +71,7 @@ class FakeLLM:
 
     def _plan(self, mensajes):
         self.llamadas.append("plan")
+        self.mensajes_plan.append(mensajes)
         if self.fallar_plan:
             raise RuntimeError("gateway caido")
         plan = self.plan_fijo or Plan(
@@ -91,6 +94,7 @@ class FakeLLM:
     # -- redaccion -------------------------------------------------------
     def invoke(self, mensajes):
         self.llamadas.append("redaccion")
+        self.mensajes_redaccion.append(mensajes)
         if self.fallar_redaccion:
             raise RuntimeError("gateway caido")
         return SimpleNamespace(
@@ -295,13 +299,120 @@ def test_un_fallo_del_gateway_al_planificar_degrada_a_plan_de_respaldo(entorno):
     assert "F1-DOC-0" in out["answer"]
 
 
+def test_el_plan_de_respaldo_marca_el_turno_como_no_cacheable(entorno):
+    """El turno termina en `ok`; sin la marca el cache congelaria la respuesta de respaldo."""
+    from src.observability import turnlog
+
+    g, llm, _ = entorno()
+    llm.fallar_plan = True
+    turnlog.start_turn()
+    g.invoke({"question": "capacidades antisatelite"}, _config())
+    assert turnlog.no_cacheable() == "plan_de_respaldo"
+
+
+class IndicePorTema:
+    """Un tema puntua MAS ALTO que el otro, como "IA en defensa" frente a "amenazas
+    a satelites" en el corpus real (0,62 frente a 0,55)."""
+
+    def search(self, query: str, k: int = 8):  # noqa: ARG002
+        sat = "satelit" in query.lower()
+        pref, fen, base = ("F2-SAT", 2, 0.55) if sat else ("F1-IA", 1, 0.62)
+        return [
+            Hit(
+                chunk_id=f"{pref}-{i}",
+                doc_id=f"{pref}-{i}",
+                text=f"texto {i} sobre {query}",
+                score=base - i * 0.001,
+                metadata={"fenomeno": fen, "organizacion": "X"},
+            )
+            for i in range(8)
+        ]
+
+
+def _plan_de_comparacion() -> Plan:
+    return Plan(
+        pasos=[
+            Paso(agente="agente_documental", consulta="amenazas a los satelites", fenomeno="F2"),
+            Paso(agente="agente_documental", consulta="uso de ia en defensa", fenomeno="F1"),
+        ],
+        paralelo=False,
+    )
+
+
+def test_una_comparacion_lleva_evidencia_de_los_dos_temas_al_redactor(entorno, monkeypatch):
+    """Antes se ordenaba la mezcla por puntaje y el redactor (que ve 8) recibia 8 de
+    IA y 0 de satelites: la respuesta afirmaba que el corpus no decia nada de satelites."""
+    g, llm, _ = entorno(plan=_plan_de_comparacion())
+    monkeypatch.setattr(corpus, "_index", IndicePorTema())
+    g.invoke({"question": "compara satelites con ia"}, _config("h-comparar"))
+
+    sobres = _usuario(llm.mensajes_redaccion[0])  # [0]: la redaccion; despues viene el verificador
+    assert sobres.count("documento: F2-SAT") == 4
+    assert sobres.count("documento: F1-IA") == 4
+
+
+def test_con_un_solo_paso_la_evidencia_sigue_ordenada_por_puntaje(entorno, monkeypatch):
+    plan = Plan(pasos=[Paso(agente="agente_documental", consulta="uso de ia en defensa")])
+    g, llm, _ = entorno(plan=plan)
+    monkeypatch.setattr(corpus, "_index", IndicePorTema())
+    g.invoke({"question": "ia en defensa"}, _config("h-un-paso"))
+
+    sobres = _usuario(llm.mensajes_redaccion[0])  # [0]: la redaccion; despues viene el verificador
+    assert sobres.index("F1-IA-0") < sobres.index("F1-IA-1") < sobres.index("F1-IA-7")
+
+
+# -- consulta ajena al dominio -------------------------------------------------
+
+
+def test_una_consulta_ajena_al_dominio_se_rechaza_sin_buscar_ni_redactar(entorno):
+    """El orquestador declara `pasos: []`. Antes caia al plan de respaldo, buscaba
+    material sin relacion y gastaba 8.879 tokens para responder sobre un Mundial."""
+    g, llm, indice = entorno(plan=Plan(razonamiento="deportes", pasos=[]))
+    out = g.invoke({"question": "quien gano el mundial de futbol"}, _config("h-ajena"))
+
+    assert out["answer"] == voz.FUERA_DE_DOMINIO
+    assert llm.llamadas == ["plan"], "una sola llamada: la del orquestador"
+    assert indice.consultas == [], "no se busco nada en el corpus"
+
+
+def test_un_plan_vacio_del_orquestador_no_cae_al_respaldo():
+    from src.agents import orchestrator
+    from src.observability import turnlog
+
+    llm = FakeLLM(plan=Plan(razonamiento="ajena", pasos=[]))
+    turnlog.start_turn()
+    plan = orchestrator.planificar("quien gano el mundial", modelo=llm)
+
+    assert plan.pasos == []
+    assert turnlog.no_cacheable() == ""  # no es un respaldo: es una decision
+
+
+def test_un_plan_vacio_al_replanificar_si_es_un_fallo():
+    """Ya hubo una busqueda sin evidencia: un plan vacio no puede significar 'ajena'."""
+    from src.agents import orchestrator
+
+    llm = FakeLLM(plan=Plan(pasos=[]))
+    plan = orchestrator.planificar("algo", motivo="sin evidencia", modelo=llm)
+
+    assert [p.agente for p in plan.pasos] == ["agente_documental"]
+
+
+def test_un_plan_valido_no_marca_el_turno(entorno):
+    from src.observability import turnlog
+
+    g, _, _ = entorno()
+    turnlog.start_turn()
+    g.invoke({"question": "capacidades antisatelite"}, _config())
+    assert turnlog.no_cacheable() == ""
+
+
 def test_un_fallo_al_redactar_entrega_la_evidencia_cruda(entorno):
     """Una disculpa generica puntua cero en relevancia; unos fragmentos con su
     procedencia son evidencia real."""
     g, llm, _ = entorno()
     llm.fallar_redaccion = True
     out = g.invoke({"question": "satelites"}, _config())
-    assert "Fragmentos mas relevantes" in out["answer"]
+    assert voz.SIN_REDACCION in out["answer"]
     assert "F1-DOC-0" in out["answer"]
 
 
@@ -315,7 +426,7 @@ def test_un_agente_no_implementado_no_tumba_el_turno(entorno):
 def test_sin_evidencia_lo_dice_en_vez_de_inventar(entorno):
     g, llm, _ = entorno(n=0)  # el indice no devuelve nada
     out = g.invoke({"question": "algo que no existe"}, _config())
-    assert "No encontre evidencia" in out["answer"]
+    assert out["answer"] == voz.SIN_RESULTADOS
     assert llm.redacciones == 0  # no se paga una redaccion sin nada que redactar
 
 
@@ -389,6 +500,76 @@ def test_dos_sesiones_no_comparten_historial(entorno):
     assert humanos == ["de la sesion B"]
 
 
+# -- conversacion: los agentes entienden un seguimiento ----------------------
+
+
+def _usuario(mensajes) -> str:
+    return next(m["content"] for m in reversed(mensajes) if m["role"] == "user")
+
+
+def test_el_primer_turno_de_una_sesion_no_paga_historial(entorno):
+    """Sin conversacion previa el prompt es identico al de antes: 0 tokens extra."""
+    g, llm, _ = entorno()
+    g.invoke({"question": "capacidades antisatelite"}, _config("h-primero"))
+    assert "Conversacion previa" not in _usuario(llm.mensajes_plan[0])
+    assert "Conversacion previa" not in _usuario(llm.mensajes_redaccion[0])
+
+
+def test_un_seguimiento_ve_la_conversacion_en_el_orquestador_y_en_el_redactor(entorno):
+    g, llm, _ = entorno()
+    g.invoke({"question": "capacidades antisatelite"}, _config("h-seg"))
+    g.invoke({"question": "resumelo en una frase"}, _config("h-seg"))
+
+    plan = _usuario(llm.mensajes_plan[-1])
+    assert plan.splitlines()[0] == "resumelo en una frase"  # la pregunta sigue primero
+    assert "Usuario: capacidades antisatelite" in plan
+    assert "Asistente: Segun el documento F1-DOC-0" in plan
+    assert "AUTONOMA" in plan
+
+    redaccion = _usuario(llm.mensajes_redaccion[-1])
+    assert "Usuario: capacidades antisatelite" in redaccion
+    assert "Pregunta: resumelo en una frase" in redaccion
+
+
+def test_la_conversacion_no_cruza_de_sesion(entorno):
+    g, llm, _ = entorno()
+    g.invoke({"question": "tema de la sesion A"}, _config("h-A"))
+    g.invoke({"question": "otra pregunta"}, _config("h-B"))
+    assert "Conversacion previa" not in _usuario(llm.mensajes_plan[-1])
+
+
+def test_conversacion_previa_excluye_la_pregunta_actual_y_acota_el_tamano():
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from src.agents.memory import MAX_CHARS_MENSAJE, conversacion_previa
+
+    mensajes = [
+        HumanMessage(content="vieja 1"),
+        AIMessage(content="resp vieja 1"),
+        HumanMessage(content="vieja 2"),
+        AIMessage(content="resp vieja 2"),
+        ToolMessage(content="ruido de tool", tool_call_id="t1"),
+        HumanMessage(content="reciente"),
+        AIMessage(content="x" * (MAX_CHARS_MENSAJE * 3)),
+        HumanMessage(content="pregunta actual"),
+    ]
+    texto = conversacion_previa(mensajes, "pregunta actual")
+    assert "pregunta actual" not in texto
+    assert "ruido de tool" not in texto
+    assert "vieja 1" not in texto, "solo las ultimas 2 vueltas"
+    assert "Usuario: reciente" in texto
+    assert all(len(linea) <= MAX_CHARS_MENSAJE + 20 for linea in texto.splitlines())
+    assert conversacion_previa([HumanMessage(content="a")], "a") == ""
+    assert conversacion_previa([], "a") == ""
+
+
+def test_la_replanificacion_conserva_la_conversacion():
+    from src.agents.orchestrator import _mensajes
+
+    contenido = _usuario(_mensajes("q", "sin evidencia", ["q0"], "Usuario: antes"))
+    assert "Usuario: antes" in contenido and "sin evidencia" in contenido
+
+
 # -- plan --------------------------------------------------------------------
 
 
@@ -398,6 +579,54 @@ def test_el_plan_de_respaldo_es_determinista_y_gratis():
     p = plan_de_respaldo("una pregunta")
     assert p.pasos[0].agente == "agente_documental"
     assert p.pasos[0].consulta == "una pregunta"
+
+
+def test_el_plan_acepta_las_claves_con_la_capitalizacion_del_esquema():
+    """gpt-oss-120b devuelve a veces el `title` del esquema ("Pasos") como clave."""
+    p = Plan.model_validate(
+        {
+            "Razonamiento": "conteo",
+            "Pasos": [{"Agente": "agente_analitico", "Consulta": "x", "Group By": "organizacion"}],
+            "Paralelo": False,
+        }
+    )
+    assert p.pasos[0].agente == "agente_analitico"
+    assert p.pasos[0].group_by == "organizacion"
+    assert p.paralelo is False
+
+
+def test_el_plan_sigue_rechazando_campos_que_no_existen():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Plan.model_validate({"Pasos": [], "inventado": 1})
+
+
+@pytest.mark.parametrize(
+    "pregunta, agentes",
+    [
+        ("¿Cuántos documentos hay por fenómeno?", ["agente_analitico"]),
+        ("¿Cuántas publicaciones tiene cada organización?", ["agente_analitico"]),
+        ("Muéstrame la distribución por año", ["agente_analitico"]),
+        (
+            "Grafica la cantidad de documentos por organizacion",
+            ["agente_analitico", "agente_visualizador"],
+        ),
+        ("¿Qué reporta el corpus sobre capacidades antisatélite?", ["agente_documental"]),
+        ("¿Cuántos satélites lanzó China en 2023?", ["agente_documental"]),
+    ],
+)
+def test_el_plan_de_respaldo_manda_el_conteo_al_analitico(pregunta, agentes):
+    from src.agents.plan import plan_de_respaldo
+
+    assert plan_de_respaldo(pregunta).agentes == agentes
+
+
+def test_la_dimension_del_analitico_no_depende_de_las_tildes():
+    from src.agents.executors import _dimension
+
+    assert _dimension("¿Cuántos documentos por organización?") == "organizacion"
+    assert _dimension("evolución por año") == "anio"
 
 
 def test_el_plan_rechaza_agentes_que_no_estan_en_la_agent_card():
@@ -432,3 +661,33 @@ def test_ejecutor_no_registrado_devuelve_error_en_vez_de_lanzar(monkeypatch):
     monkeypatch.delitem(executors.EJECUTORES, "agente_analitico")
     r = executors.ejecutar(Paso(agente="agente_analitico", consulta="x"))
     assert r.error and not r.evidencia
+
+
+# -- presupuesto de tiempo del turno ----------------------------------------
+
+
+def test_sin_tiempo_no_se_redacta_y_se_entrega_la_evidencia(entorno, monkeypatch):
+    """El frontend abandona a los 90 s. Mas vale una respuesta imperfecta que
+    una que no llega."""
+    from src.agents import budget
+
+    g, llm, _ = entorno()
+    monkeypatch.setattr(budget, "alcanza", lambda coste=0.0: False)
+    out = g.invoke({"question": "satelites"}, _config())
+    assert llm.redacciones == 0
+    assert "F1-DOC-0" in out["answer"]  # la evidencia recuperada, sin redactar
+
+
+def test_sin_tiempo_no_se_replanifica(entorno, monkeypatch):
+    from src.agents import budget
+
+    g, llm, _ = entorno(score=0.1)
+    monkeypatch.setattr(budget, "alcanza", lambda coste=0.0: False)
+    g.invoke({"question": "algo que no esta"}, _config())
+    assert llm.planes == 1  # la replanificacion son dos llamadas mas
+
+
+def test_con_tiempo_de_sobra_el_turno_es_el_normal(entorno):
+    g, llm, _ = entorno()
+    g.invoke({"question": "satelites"}, _config())
+    assert llm.planes == 1 and llm.redacciones == 1

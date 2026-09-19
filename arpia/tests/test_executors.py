@@ -211,7 +211,56 @@ def test_el_analitico_declara_lo_que_deja_fuera(llm):
     """Un conteo por ano que ignora en silencio los documentos sin ano es una
     cifra enganosa."""
     r = executors.analitico(Paso(agente="agente_analitico", consulta="evolucion por ano"))
-    assert "no declaran anio" in r.texto
+    assert "no declaran año" in r.texto
+
+
+def _agregado_falso(filas):
+    """Resultado de `aggregates.agregar` con las filas dadas, en ese orden."""
+    return {
+        "filas": filas,
+        "cobertura": {
+            "documentos_universo": 10,
+            "documentos_en_dimension": 10,
+            "documentos_contados": 10,
+            "sin_dato_en_la_dimension": 0,
+        },
+    }
+
+
+def test_el_texto_del_conteo_usa_los_nombres_en_castellano(llm):
+    """`anio` no es una palabra: el analista lee "por año", "por organización"."""
+    por_anio = executors.analitico(Paso(agente="agente_analitico", consulta="x", group_by="anio"))
+    por_org = executors.analitico(
+        Paso(agente="agente_analitico", consulta="x", group_by="organizacion")
+    )
+    assert "por año:" in por_anio.texto
+    assert "por organización:" in por_org.texto
+    assert "anio" not in por_anio.texto.replace("F1-A", "")
+
+
+def test_un_conteo_de_uno_va_en_singular(llm, monkeypatch):
+    fila = {"clave": "CSET", "valor": 1, "doc_ids": ["F1-A-1"]}
+    monkeypatch.setattr(aggregates, "agregar", lambda **_k: _agregado_falso([fila]))
+    r = executors.analitico(Paso(agente="agente_analitico", consulta="x", group_by="organizacion"))
+    assert "CSET: 1 documento (" in r.texto
+    assert "1 documentos" not in r.texto
+
+
+def test_la_serie_por_anio_sale_en_orden_cronologico_no_por_cantidad(llm, monkeypatch):
+    filas = [
+        {"clave": "2025", "valor": 90, "doc_ids": ["F1-A-2"]},
+        {"clave": "2020", "valor": 30, "doc_ids": ["F1-A-1"]},
+        {"clave": "2022", "valor": 50, "doc_ids": ["F3-C-1"]},
+    ]
+    monkeypatch.setattr(aggregates, "agregar", lambda **_k: _agregado_falso(filas))
+    r = executors.analitico(Paso(agente="agente_analitico", consulta="x", group_by="anio"))
+    assert r.texto.index("2020:") < r.texto.index("2022:") < r.texto.index("2025:")
+
+
+def test_el_redactor_respeta_el_formato_que_pide_la_pregunta():
+    """ "En una sola frase" mandaba la estructura fija: el redactor la ignoraba."""
+    assert "FORMATO PEDIDO" in executors.REDACCION_PROMPT
+    assert "en una sola frase" in executors.REDACCION_PROMPT
 
 
 def test_el_analitico_registra_su_tool_en_la_traza(llm):
@@ -247,6 +296,27 @@ def test_toda_vista_temporal_declara_su_cobertura(llm):
     llm.spec = ViewSpec(chart="timeline", group_by="anio")
     r = executors.visualizador(Paso(agente="agente_visualizador", consulta="evolucion"))
     assert "34%" in r.view_spec["nota"]
+
+
+def test_la_vista_hereda_el_fenomeno_que_acoto_el_plan(llm):
+    """Medido contra el gateway real: el visualizador solo recibe `consulta`, no
+    ve `paso.fenomeno`. Sin imponerlo, el titulo decia "seguridad del entorno
+    espacial" y el tablero pintaba los tres fenomenos."""
+    llm.spec = ViewSpec(chart="timeline", group_by="anio", titulo="Evolucion anual")
+    r = executors.visualizador(
+        Paso(agente="agente_visualizador", consulta="evolucion anual", fenomeno="F2")
+    )
+    assert r.view_spec["fenomenos"] == ["F2"]
+
+
+def test_el_fenomeno_que_eligio_el_modelo_manda_sobre_el_del_plan(llm):
+    """Se impone solo cuando el modelo no decidio: si eligio, su eleccion es mas
+    especifica que el filtro del plan y sobrescribirla seria perder informacion."""
+    llm.spec = ViewSpec(chart="bar", fenomenos=["F1", "F3"])
+    r = executors.visualizador(
+        Paso(agente="agente_visualizador", consulta="compara", fenomeno="F2")
+    )
+    assert r.view_spec["fenomenos"] == ["F1", "F3"]
 
 
 def test_el_visualizador_consulta_el_catalogo_antes_de_emitir(llm):
@@ -290,3 +360,101 @@ def test_las_dimensiones_disponibles_salen_de_datos_reales():
     assert d["organizaciones"] == ["CSET", "CSIS", "ILIA"]
     assert d["anios"] == {"min": 2023, "max": 2025}
     assert d["cobertura_anio_pct"] == 34
+
+
+# -- los tres huecos que descubrio la primera prueba contra el gateway -------
+
+
+def test_la_recuperacion_deja_rastro_en_tools_called(indice, llm):
+    """Con el gateway real, un turno documental reporto 8 fragmentos y
+    `tools_called: []`. ADL evalua la trayectoria a partir de ese campo: una
+    recuperacion sin rastro se lee como una respuesta salida de la nada."""
+    indice()
+    executors.documental(Paso(agente="agente_documental", consulta="satelites"))
+    llamadas = turnlog.tool_calls()
+    assert [t["name"] for t in llamadas] == ["buscar_corpus"]
+    assert llamadas[0]["input_parameters"]["query"] == "satelites"
+
+
+def test_la_tool_registrada_no_duplica_el_registro(indice, llm):
+    """`buscar_corpus` ya lo anota el registry: dos entradas por una sola
+    busqueda falsearian la trayectoria."""
+    indice()
+    from src.tools.corpus import buscar_corpus
+
+    buscar_corpus(query="satelites")
+    assert [t["name"] for t in turnlog.tool_calls()] == ["buscar_corpus"]
+
+
+def test_los_ejecutores_se_anotan_aunque_no_gasten_tokens(llm):
+    """El analitico cuesta cero por diseno. Derivar `agentes_invocados` del
+    desglose de tokens lo dejaba invisible pese a haber trabajado, y es
+    justamente el agente de puntos extra."""
+    executors.ejecutar(Paso(agente="agente_analitico", consulta="cuantos por tema"))
+    assert turnlog.agentes() == ["agente_analitico"]
+
+
+def test_un_ejecutor_que_falla_tambien_aparece_en_la_trayectoria(monkeypatch):
+    monkeypatch.setitem(
+        executors.EJECUTORES,
+        "agente_analitico",
+        lambda paso: 1 / 0,  # noqa: ARG005
+    )
+    executors.ejecutar(Paso(agente="agente_analitico", consulta="x"))
+    assert turnlog.agentes() == ["agente_analitico"]
+
+
+def test_el_analitico_obedece_la_dimension_del_plan(llm):
+    """Con el gateway real, el orquestador reformulo el paso y perdio la palabra
+    'organizacion': el texto contesto por fenomeno mientras el grafico agrupaba
+    por organizacion. El plan manda; la heuristica es solo el respaldo."""
+    paso = Paso(agente="agente_analitico", consulta="volumen documental", group_by="organizacion")
+    r = executors.analitico(paso)
+    assert "CSET: 2" in r.texto
+
+
+def test_sin_dimension_en_el_plan_se_recurre_a_la_heuristica(llm):
+    paso = Paso(agente="agente_analitico", consulta="cuantos documentos por tema")
+    assert "F1: 2 documentos" in executors.analitico(paso).texto
+
+
+# -- la delegacion del orquestador queda en la trayectoria -------------------
+
+
+def _card() -> dict:
+    import json
+    from pathlib import Path
+
+    return json.loads(Path("agent_card.json").read_text("utf-8"))
+
+
+def test_la_delegacion_aparece_en_tools_called(indice, llm):
+    """ADL evalua el bloque de diseno cruzando la agent card contra la traza. El
+    orquestador delega emitiendo un paso del plan, no llamando a una tool: sin
+    anotarlo, su funcion principal nunca aparecia en `tools_called`."""
+    indice()
+    executors.ejecutar(Paso(agente="agente_documental", consulta="satelites", fenomeno="F2"))
+    llamadas = turnlog.tool_calls()
+    assert [t["name"] for t in llamadas] == ["delegar_documental", "buscar_corpus"]
+    assert llamadas[0]["input_parameters"] == {"consulta": "satelites", "fenomeno": "F2"}
+
+
+def test_cada_agente_usa_el_nombre_de_delegacion_que_declara_la_card():
+    card = _card()
+    declaradas = {t["name"] for t in card["orquestador"]["tools"]}
+    usadas = {nombre for nombre, _ in executors.DELEGACIONES.values()}
+    assert usadas == declaradas, "la card y el codigo deben nombrar igual la delegacion"
+
+
+def test_los_argumentos_anotados_son_los_que_declara_la_card():
+    card = _card()
+    por_nombre = {t["name"]: set(t["input_parameters"]) for t in card["orquestador"]["tools"]}
+    for nombre, campos in executors.DELEGACIONES.values():
+        assert set(campos) == por_nombre[nombre], nombre
+
+
+def test_la_delegacion_al_visualizador_usa_instruccion(llm):
+    executors.ejecutar(Paso(agente="agente_visualizador", consulta="grafica esto"))
+    primera = turnlog.tool_calls()[0]
+    assert primera["name"] == "delegar_visualizacion"
+    assert primera["input_parameters"] == {"instruccion": "grafica esto"}

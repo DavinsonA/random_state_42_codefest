@@ -27,12 +27,14 @@ Ver comandos completos en [`CLAUDE.md`](CLAUDE.md).
 ```
 AGENTS.md                 directivas para agentes de código (leer primero)
 CLAUDE.md                 manual de operación en terminal
-.claude/skills/            12 skills reutilizables para Claude Code
+.claude/skills/            10 skills reutilizables para Claude Code
 scripts/                  setup, iteración por nodo, preflight — operan sobre ../arpia
 docs/prompts/              prompts versionados (incluye el del pitch)
-docs/architecture.md       enlace a ../arpia/docs/architecture.md
 lab/                       experimentos desechables — nada de aquí se despliega
 ```
+
+La arquitectura del sistema se documenta junto al código que describe:
+[`../arpia/docs/architecture.md`](../arpia/docs/architecture.md).
 
 ## Reglas que el andamiaje hace cumplir (sobre `../arpia`)
 

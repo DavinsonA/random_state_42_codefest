@@ -72,6 +72,8 @@ class VectorIndex:
         self._offsets: array[int] = array("q")
         self._doc_offsets: dict[str, int] = {}
         self._doc_chunks: dict[str, int] = {}
+        #: Indice de fila (no de byte) del primer fragmento de cada documento.
+        self._doc_first: dict[str, int] = {}
         self._manifest: dict[str, Any] = {}
         self._lock = threading.Lock()
 
@@ -95,6 +97,7 @@ class VectorIndex:
         offsets = array("q")
         docs: dict[str, int] = {}
         chunks: dict[str, int] = {}
+        primeras: dict[str, int] = {}
         with self.meta_path.open("rb") as fh:
             pos = 0
             for linea in fh:
@@ -104,11 +107,13 @@ class VectorIndex:
                     if m:
                         doc_id = m.group(1).decode("utf-8")
                         docs.setdefault(doc_id, pos)
+                        primeras.setdefault(doc_id, len(offsets) - 1)
                         chunks[doc_id] = chunks.get(doc_id, 0) + 1
                 pos += len(linea)
         self._offsets = offsets
         self._doc_offsets = docs
         self._doc_chunks = chunks
+        self._doc_first = primeras
 
     def _load(self) -> None:
         if self._index is not None:
@@ -157,6 +162,52 @@ class VectorIndex:
         """Fila i-esima de la metadata, alineada con el vector i del indice."""
         return self._row_at(self._offsets[i])
 
+    def _enriquecida(self, row: dict[str, Any]) -> dict[str, Any]:
+        """`enrich` mas `total_fragmentos`: cuantos fragmentos tiene el documento.
+
+        Sale de un diccionario ya construido en el arranque, asi que es gratis, y
+        permite mostrar "fragmento 12 de 87" junto a una cita sin otra consulta.
+        """
+        fila = enrich(row)
+        total = self._doc_chunks.get(fila.get("doc_id", ""))
+        if total is not None:
+            fila["total_fragmentos"] = total
+        return fila
+
+    def n_chunks(self, doc_id: str) -> int | None:
+        """Fragmentos de un documento, o None si el documento no existe."""
+        self._load()
+        return self._doc_chunks.get(doc_id)
+
+    def chunks_of(self, doc_id: str, desde: int, hasta: int) -> list[dict[str, Any]] | None:
+        """Fragmentos `desde`..`hasta` (ambos incluidos) de un documento, en orden.
+
+        None si el documento no existe. El rango se recorta a lo que hay.
+
+        Acceso directo, no recorrido: el JSONL agrupa cada documento en un bloque
+        contiguo y ordenado (comprobado sobre las 326.866 filas), asi que el
+        fragmento `n` esta en la fila `primera + n`. Importa porque un documento
+        llega a 76.220 fragmentos: recorrerlo entero para mostrar cinco seria
+        inaceptable en un endpoint que se llama al pasar el raton por una cita.
+        Cada fila leida se valida contra su `doc_id`, por si el orden cambiara.
+        """
+        self._load()
+        primera = self._doc_first.get(doc_id)
+        total = self._doc_chunks.get(doc_id)
+        if primera is None or total is None:
+            return None
+
+        desde, hasta = max(desde, 0), min(hasta, total - 1)
+        filas: list[dict[str, Any]] = []
+        for n in range(desde, hasta + 1):
+            if primera + n >= len(self._offsets):
+                break
+            fila = self._row_at(self._offsets[primera + n])
+            if fila.get("doc_id") != doc_id:
+                break
+            filas.append(self._enriquecida(fila))
+        return filas
+
     # -- consulta --------------------------------------------------------
 
     def _encode(self, texts: list[str]):
@@ -183,7 +234,7 @@ class VectorIndex:
         for score, idx in zip(scores[0], ids[0], strict=True):
             if idx < 0:
                 continue
-            row = enrich(self.row(int(idx)))
+            row = self._enriquecida(self.row(int(idx)))
             hits.append(
                 Hit(
                     chunk_id=row.get("chunk_id", str(idx)),
@@ -205,25 +256,35 @@ class VectorIndex:
         for doc_id in doc_ids:
             offset = self._doc_offsets.get(doc_id)
             if offset is not None:
-                encontrados[doc_id] = enrich(self._row_at(offset))
+                encontrados[doc_id] = self._enriquecida(self._row_at(offset))
         return encontrados
 
     def chunk(self, chunk_id: str) -> dict[str, Any] | None:
         """Un fragmento concreto por su `chunk_id`. None si no existe.
 
         Sin mapa en memoria: los `chunk_id` tienen la forma
-        `{doc_id}__chunk_{n}` y el JSONL esta agrupado por documento, asi que se
-        salta al primer fragmento del documento y se avanza hasta encontrarlo.
+        `{doc_id}__chunk_{n}`, y `n` es la posicion del fragmento dentro de su
+        documento. Con eso se salta directo a su fila. Si el id no cumple esa
+        forma, o la fila no es la esperada, se recorre el bloque del documento
+        como antes: mas lento (un CSV llega a 76.220 fragmentos) pero correcto.
         Un diccionario de 326.866 claves costaria ~40 MB para responder a un
         endpoint que el tablero usa al hacer clic en una cita.
         """
         self._load()
-        doc_id = chunk_id.split("__chunk_")[0]
+        doc_id, _, sufijo = chunk_id.partition("__chunk_")
         offset = self._doc_offsets.get(doc_id)
         if offset is None:
             return None
 
         total = self._doc_chunks.get(doc_id, 0)
+        # `chunk_id` llega de internet: solo digitos ASCII y de largo acotado.
+        # `isdigit()` no basta (acepta "²", que `int()` rechaza) y `int()` de una
+        # cadena de miles de digitos lanza ValueError.
+        if sufijo.isascii() and sufijo.isdecimal() and len(sufijo) <= 9 and int(sufijo) < total:
+            fila = self._row_at(self._offsets[self._doc_first[doc_id] + int(sufijo)])
+            if fila.get("chunk_id") == chunk_id:
+                return self._enriquecida(fila)
+
         with self._lock:
             assert self._fh is not None
             self._fh.seek(offset)
@@ -231,8 +292,12 @@ class VectorIndex:
                 linea = self._fh.readline()
                 if not linea:
                     break
+                # La subcadena solo preselecciona: sin la comparacion exacta, un id
+                # truncado ("...__chunk_00000") devolveria el fragmento equivocado.
                 if chunk_id.encode("utf-8") in linea:
-                    return enrich(json.loads(linea))
+                    fila = json.loads(linea)
+                    if fila.get("chunk_id") == chunk_id:
+                        return self._enriquecida(fila)
         return None
 
     def document_table(self) -> list[dict[str, Any]]:

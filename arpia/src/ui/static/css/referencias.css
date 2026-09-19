@@ -1,0 +1,250 @@
+/* Referencias: tooltip al pasar el raton y visor del documento.
+ *
+ * Sin colores literales: todo sale de tokens.css. `--arpia-evidence` esta
+ * reservado por el diseno a citas y trazabilidad, asi que es el unico acento.
+ */
+
+/* -- referencia dentro del texto de la respuesta ------------------------------ */
+
+.ref {
+    display: inline;
+    padding: 0 3px;
+    border: 0;
+    border-bottom: 1px dotted var(--arpia-evidence);
+    border-radius: var(--radio-sm);
+    background: color-mix(in srgb, var(--arpia-evidence) 12%, transparent);
+    color: var(--arpia-evidence);
+    font-size: 0.92em;
+    cursor: pointer;
+}
+
+.ref:hover,
+.ref:focus-visible {
+    background: color-mix(in srgb, var(--arpia-evidence) 24%, transparent);
+    border-bottom-style: solid;
+}
+
+/* -- tooltip ------------------------------------------------------------------- */
+
+.ref-tooltip {
+    position: fixed;
+    z-index: 60;
+    width: max-content;
+    max-width: min(360px, calc(100vw - 16px));
+    padding: 10px 12px;
+    border: 1px solid var(--arpia-border-active);
+    border-left: 2px solid var(--arpia-evidence);
+    border-radius: var(--radio);
+    background: var(--arpia-elevated);
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--arpia-void) 70%, transparent);
+    color: var(--arpia-text);
+    font-size: 12px;
+    line-height: 1.45;
+    pointer-events: none;
+}
+
+.ref-tooltip[hidden] {
+    display: none;
+}
+
+.ref-tooltip-origen {
+    font-weight: 600;
+}
+
+.ref-tooltip-id,
+.ref-tooltip-pos {
+    color: var(--arpia-text-secondary);
+}
+
+.ref-tooltip-texto {
+    margin: 8px 0 0;
+    padding: 0;
+    color: var(--arpia-text);
+    overflow-wrap: anywhere;
+}
+
+.ref-tooltip-pie {
+    margin-top: 8px;
+    color: var(--arpia-text-muted);
+    font-size: 11px;
+}
+
+/* -- tarjeta de evidencia ------------------------------------------------------ */
+
+.evidencia-meta {
+    margin: 2px 0 0;
+    color: var(--arpia-text-secondary);
+    font-size: 11px;
+}
+
+.evidencia-abrir {
+    margin-top: 6px;
+}
+
+/* -- visor del documento ------------------------------------------------------- */
+
+.visor-fondo {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    background: color-mix(in srgb, var(--arpia-void) 60%, transparent);
+}
+
+.visor-fondo[hidden],
+.visor[hidden] {
+    display: none;
+}
+
+.visor {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 71;
+    display: flex;
+    flex-direction: column;
+    width: min(560px, 100vw);
+    border-left: 1px solid var(--arpia-border-active);
+    background: var(--arpia-surface);
+    color: var(--arpia-text);
+    box-shadow: -12px 0 32px color-mix(in srgb, var(--arpia-void) 60%, transparent);
+    animation: visor-entra 160ms ease-out;
+}
+
+@keyframes visor-entra {
+    from {
+        transform: translateX(24px);
+        opacity: 0;
+    }
+    to {
+        transform: none;
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .visor {
+        animation: none;
+    }
+}
+
+.visor-cabeza {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px;
+    border-bottom: 1px solid var(--arpia-border);
+}
+
+.visor-titulos {
+    min-width: 0;
+}
+
+.visor-titulo {
+    margin: 0;
+    color: var(--arpia-evidence);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.visor-meta {
+    margin: 4px 0 0;
+    color: var(--arpia-text-secondary);
+    font-size: 12px;
+}
+
+.visor-fuente {
+    margin: 4px 0 0;
+    color: var(--arpia-text-muted);
+    font-size: 10px;
+    overflow-wrap: anywhere;
+}
+
+.visor-cerrar {
+    flex-shrink: 0;
+}
+
+.visor-cuerpo {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    overflow-y: auto;
+}
+
+.visor-aviso {
+    margin: 0;
+    color: var(--arpia-text-secondary);
+    font-size: 13px;
+}
+
+.visor-error {
+    color: var(--arpia-warning);
+}
+
+.visor-frag {
+    padding: 10px 12px;
+    border-left: 2px solid var(--arpia-border-active);
+    border-radius: 0 var(--radio-sm) var(--radio-sm) 0;
+    background: var(--arpia-bg);
+}
+
+.visor-frag-citado {
+    border-left: 3px solid var(--arpia-evidence);
+    background: color-mix(in srgb, var(--arpia-evidence) 10%, var(--arpia-bg));
+}
+
+.visor-frag-cabeza {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+    color: var(--arpia-text-muted);
+    font-size: 11px;
+}
+
+.visor-frag-marca {
+    padding: 1px 6px;
+    border: 1px solid var(--arpia-evidence);
+    border-radius: var(--radio-sm);
+    color: var(--arpia-evidence);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/* pre-wrap: un fragmento de CSV son filas, y los saltos de linea importan */
+.visor-frag-texto {
+    color: var(--arpia-text);
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.visor-frag-completo {
+    margin-top: 6px;
+}
+
+.visor-pie {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 16px;
+    border-top: 1px solid var(--arpia-border);
+}
+
+.visor-pie[hidden] {
+    display: none;
+}
+
+.visor-rango {
+    color: var(--arpia-text-secondary);
+    font-size: 11px;
+    text-align: center;
+}

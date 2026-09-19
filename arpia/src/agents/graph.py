@@ -27,13 +27,14 @@ from __future__ import annotations
 
 import contextvars
 from concurrent.futures import ThreadPoolExecutor
+from itertools import zip_longest
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langgraph.graph import END, START, StateGraph
 
-from src.agents import executors, orchestrator, verifier
-from src.agents.memory import VENTANA_TURNOS
+from src.agents import budget, executors, orchestrator, verifier, voz
+from src.agents.memory import VENTANA_TURNOS, conversacion_previa
 from src.agents.plan import MAX_REPLANES, Paso, Plan
 from src.agents.state import TURNO_LIMPIO, AgentState
 from src.config import get_logger
@@ -88,7 +89,12 @@ def planificar(state: AgentState) -> dict[str, Any]:
         motivo = "ningun fragmento supero el umbral de similitud"
         intentadas = [p.get("consulta", "") for p in state.get("plan", {}).get("pasos", [])]
 
-    plan = orchestrator.planificar(state["question"], motivo=motivo, intentadas=intentadas)
+    plan = orchestrator.planificar(
+        state["question"],
+        motivo=motivo,
+        intentadas=intentadas,
+        conversacion=conversacion_previa(state.get("messages") or [], state["question"]),
+    )
     return {"plan": plan.model_dump(), "replans": replans}
 
 
@@ -100,6 +106,12 @@ def ejecutar(state: AgentState) -> dict[str, Any]:
     """
     plan = Plan.model_validate(state["plan"])
     pasos = plan.pasos
+
+    if not pasos:
+        # Consulta ajena al dominio (plan vacio del orquestador): nada que ejecutar
+        # y nada que replanificar. Sin `suficiente=True` el grafo volveria a
+        # planificar y pagaria una segunda llamada para llegar al mismo lugar.
+        return {"evidence": [], "findings": {}, "view_spec": None, "suficiente": True}
 
     # En una replanificacion solo se repite lo que fallo. El visualizador no
     # depende de la evidencia: volver a emitir su vista seria pagar una segunda
@@ -125,8 +137,6 @@ def ejecutar(state: AgentState) -> dict[str, Any]:
     else:
         resultados = [executors.ejecutar(p) for p in pasos]
 
-    evidencia: list[dict[str, Any]] = []
-    vistos: set[str] = set()
     findings: dict[str, str] = {}
     view_spec = None
     for r in resultados:
@@ -136,14 +146,22 @@ def ejecutar(state: AgentState) -> dict[str, Any]:
             findings[r.agente] = r.texto
         if r.view_spec:
             view_spec = r.view_spec
-        for e in r.evidencia:
+
+    # Intercalada por pasos, NO ordenada por puntaje. El redactor solo ve los TOP_K
+    # primeros: con un orden global, el tema con mejores puntajes se los queda todos
+    # y el otro lado de una comparacion desaparece (medido: "amenazas a satelites
+    # vs IA en defensa" daba 8 fragmentos de IA y 0 de satelites, y la respuesta
+    # afirmaba que el corpus no tenia nada sobre satelites). Cada lista ya viene
+    # ordenada por puntaje; con un solo paso el resultado es el mismo de siempre.
+    evidencia: list[dict[str, Any]] = []
+    vistos: set[str] = set()
+    for turno in zip_longest(*(r.evidencia for r in resultados if r.evidencia)):
+        for e in turno:
             # El corpus tiene fragmentos repetidos entre documentos: citarlos dos
             # veces no agrega evidencia, solo gasta contexto.
-            if e["chunk_id"] not in vistos:
+            if e is not None and e["chunk_id"] not in vistos:
                 vistos.add(e["chunk_id"])
                 evidencia.append(e)
-
-    evidencia.sort(key=lambda e: -e.get("score", 0.0))
 
     # La suficiencia la deciden SOLO los agentes que buscan evidencia. Una vista
     # emitida no dice nada sobre si encontramos material: contarla como exito
@@ -177,6 +195,12 @@ def componer(state: AgentState) -> dict[str, Any]:
     aviso de la vista, que es una accion sobre el tablero y no parte de la
     respuesta.
     """
+    if not (state.get("plan") or {}).get("pasos"):
+        # El orquestador declaro la consulta fuera de dominio: respuesta fija, sin
+        # modelo (`voz.FUERA_DE_DOMINIO`, la misma que da el guardian).
+        texto = voz.FUERA_DE_DOMINIO
+        return {"answer": texto, "messages": [AIMessage(content=texto)]}
+
     findings = dict(state.get("findings") or {})
     evidencia = state.get("evidence") or []
 
@@ -185,7 +209,15 @@ def componer(state: AgentState) -> dict[str, Any]:
     # tras una replanificacion la evidencia definitiva solo se conoce ahora.
     documental = [e for e in evidencia if not str(e.get("chunk_id", "")).startswith("agregado:")]
     if documental:
-        findings[executors.AGENTE_DOCUMENTAL] = executors.redactar(state["question"], documental)
+        if budget.alcanza():
+            findings[executors.AGENTE_DOCUMENTAL] = executors.redactar(
+                state["question"],
+                documental,
+                conversacion_previa(state.get("messages") or [], state["question"]),
+            )
+        else:
+            log.warning("presupuesto de tiempo agotado; se entrega la evidencia sin redactar")
+            findings[executors.AGENTE_DOCUMENTAL] = ""
 
     partes: list[str] = []
     for agente in (executors.AGENTE_DOCUMENTAL, executors.AGENTE_ANALITICO):
@@ -195,8 +227,7 @@ def componer(state: AgentState) -> dict[str, Any]:
 
     if not partes and evidencia:
         partes.append(
-            "No pude redactar una respuesta, pero estos son los fragmentos mas "
-            "relevantes del corpus:\n\n"
+            f"{voz.SIN_REDACCION}\n\n"
             + "\n\n".join(
                 f"[{i}] ({e['citacion']}) {e['texto'][:500]}"
                 for i, e in enumerate(evidencia[:5], 1)
@@ -204,17 +235,11 @@ def componer(state: AgentState) -> dict[str, Any]:
         )
 
     if state.get("view_spec"):
-        titulo = (state["view_spec"] or {}).get("titulo") or "la vista solicitada"
-        partes.append(f"He preparado {titulo} en el tablero.")
+        titulo = (state["view_spec"] or {}).get("titulo") or "La vista solicitada"
+        partes.append(f"{titulo}: disponible en el tablero.")
 
     if not partes:
-        partes.append(
-            "No encontre evidencia en el corpus para responder esa consulta. El "
-            "corpus cubre inteligencia artificial y capacidades estrategicas, "
-            "seguridad del entorno espacial, y dinamicas territoriales en America "
-            "Latina; si reformulas la pregunta hacia alguno de esos temas, la "
-            "respondo con sus fuentes."
-        )
+        partes.append(voz.SIN_RESULTADOS)
 
     texto = "\n\n".join(partes)
     return {"answer": texto, "messages": [AIMessage(content=texto)]}
@@ -228,6 +253,11 @@ def verificar(state: AgentState) -> dict[str, Any]:
     esa comparacion falla, que es el unico caso en que hay algo que arreglar.
     """
     original = state.get("answer") or ""
+    if not budget.alcanza():
+        # La correccion cuesta una llamada. Sin tiempo, la respuesta sale tal
+        # cual: el verificador mejora una respuesta, no la sustituye.
+        log.info("presupuesto de tiempo agotado; se omite la verificacion")
+        return {}
     corregida = verifier.verificar(original, state.get("evidence") or [])
     if corregida == original:
         return {}
@@ -249,6 +279,12 @@ def tras_ejecutar(state: AgentState) -> Literal["planificar", "componer"]:
     dando vueltas gastando presupuesto sin lanzar ningun error.
     """
     if state.get("suficiente"):
+        return "componer"
+    if not budget.alcanza(budget.MARGEN_REDACCION_S):
+        # Replanificar son dos llamadas mas (plan y ejecucion) y el turno ya va
+        # tarde. Se prefiere redactar con lo que hay: el evaluador puntua una
+        # respuesta imperfecta, no una que no llego.
+        log.info("sin presupuesto de tiempo para replanificar; se redacta con lo que hay")
         return "componer"
     if state.get("replans", 0) >= MAX_REPLANES:
         log.info(

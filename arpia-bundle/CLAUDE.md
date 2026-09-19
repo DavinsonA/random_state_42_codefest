@@ -23,14 +23,13 @@ comandos exactos y espera a que el usuario los ejecute.
 | Campo | Valor |
 |---|---|
 | Nombre | A.R.P.I.A. |
-| Reto | **NO DEFINIDO** — se publica el 18 de septiembre |
-| Línea de trabajo activa | **NO DEFINIDA** — ver `docs/architecture.md` |
-| Frontend | Streamlit (decisión tomada, ver `../arpia/docs/architecture.md` §4) |
-| Framework de agentes | LangGraph |
+| Reto | Publicado — ver [`../RETO.md`](../RETO.md) |
+| Qué hay construido | [`../arpia/API.md`](../arpia/API.md) — la fuente de verdad |
+| Frontend | HTML, CSS y JS plano en `../arpia/src/ui/static/`. Sin framework, sin build, sin CDN |
+| Framework de agentes | LangGraph — orquestador de plan único, no ReAct |
 
-> **Al iniciar el evento**, actualiza esta tabla en el primer commit. Es lo
-> primero que lee cualquier agente y lo que evita que construya la línea
-> equivocada.
+> Esta tabla es lo primero que lee cualquier agente. Si algo de aquí deja de
+> ser cierto, se corrige en el mismo commit que lo cambió.
 
 ---
 
@@ -61,12 +60,17 @@ uv run --project ../arpia python scripts/run_node.py retrieve --input "..."
 uv run --project ../arpia python scripts/run_node.py --graph --input "..." --json
 
 # desde arpia/
-uv run uvicorn src.api.main:app --reload --port 8000      # API (lo que evalúa el jurado)
-uv run streamlit run src/ui/app.py                        # UI
+uv run uvicorn src.api.main:app --reload --port 8000      # API + chat + tablero
+#   API:     POST http://localhost:8000/chat
+#   chat:    http://localhost:8000/
+#   tablero: http://dashboard.localhost:8000/
 ```
 
+Un solo proceso sirve las tres cosas: `routing.py` decide qué HTML entrega en
+`/` según la cabecera `Host`.
+
 `run_node.py` es la herramienta principal de iteración: prueba lógica de
-agentes sin levantar la UI, imprime la traza y el costo estimado.
+agentes sin levantar la interfaz, imprime la traza y el costo estimado.
 
 ### Calidad
 
@@ -113,8 +117,8 @@ Bien:
 - *"Añade una tool `search_corpus` en `src/tools/` que envuelva el retriever
   de `src/retrieval/`. Docstring completo con cuándo usarla y cuándo no.
   Regístrala en el registry. Escribe el test."*
-- *"Convierte los tokens de `design-tokens.json` en un template de Plotly y
-  aplícalo en `src/theme/plotly_theme.py`. No inventes colores."*
+- *"En `src/ui/static/js/dashboard.js`, el color de cada serie debe salir de la
+  variable CSS del fenómeno que representa. No inventes colores."*
 - *"Corre `run_node.py retrieve` con estas 3 consultas y dime en qué falla
   el ranking."*
 
@@ -133,16 +137,15 @@ contiene el método: instrucciones para agentes, skills y scripts.
 ```
 ../arpia/src/
 ├── config.py          # configuración central, logger, lectura de .env
-├── theme/             # ÚNICO lugar que toca design-tokens.json
-│   ├── tokens.py      #   carga y expone tokens tipados
-│   ├── streamlit_theme.py
-│   └── plotly_theme.py
-├── retrieval/         # adaptador al índice vectorial existente
+├── theme/             # ÚNICO lugar del Python que toca design-tokens.json
+│   └── tokens.py      #   carga y expone tokens tipados
+├── retrieval/         # índice FAISS, encoder local, agregaciones
 ├── tools/             # tools del agente (una función = una tool)
-├── agents/            # estado + grafo LangGraph
+├── agents/            # el grafo LangGraph y sus siete agentes
+├── observability/     # traza, registro por turno, consumo de tokens
 ├── api/               # FastAPI: el endpoint que consume el jurado
 │   └── contracts.py   #   ÚNICO lugar con los esquemas Pydantic de la API
-└── ui/                # Streamlit
+└── ui/static/         # el chat y el tablero: HTML, CSS y JS plano
 ```
 
 Regla: `theme/` no importa de `agents/`. `tools/` no importa de `ui/`.

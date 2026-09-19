@@ -4,7 +4,7 @@
 > ADL*; este documento dice *qué hay construido, cómo funciona y qué falta*.
 > Ante conflicto con la Especificación Técnica de ADL, manda la de ADL.
 >
-> Fecha de corte: `main` @ `1f23b11` — Fases 1 a 4 (19 de septiembre de 2026).
+> Fecha de corte: `main` @ `c92029b` + trazabilidad de los conteos (19 de septiembre de 2026).
 > Si cambias el contrato o el comportamiento de un endpoint, **actualiza este archivo
 > en el mismo commit**. Un documento desactualizado es peor que ninguno.
 
@@ -22,21 +22,25 @@
 | Caché semántico (0 tokens en aciertos) | ✅ hecho | `src/agents/memory.py` |
 | Grafo LangGraph: orquestador de plan único + replanificación | ✅ hecho | `src/agents/graph.py`, `orchestrator.py`, `plan.py` |
 | Ejecutores: documental, analítico, visualizador | ✅ hechos (probados con LLM falso) | `src/agents/executors.py` |
+| Verificador condicional (0 tokens si la respuesta está sana) | ✅ hecho; ⚠️ no está declarado en la card (§12 #16) | `src/agents/verifier.py` |
 | Registro por turno (tools, contexto, citas, tokens por agente), también en planes paralelos | ✅ hecho y corregido (§12 #2) | `src/observability/` |
 | Índice vectorial, encoder local, agregaciones | ✅ hecho | `src/retrieval/` |
 | Enrutamiento por `Host` (un contenedor, 3 dominios) | ✅ hecho | `src/api/routing.py` |
 | Traducción del modelo de la card al id de LiteLLM (`gateway_model_for`) | ✅ hecho (§6) | `src/agents/card.py` |
-| **Nada se ha probado aún con el modelo real** | ❌ | — |
-| `GET /topics` | ⏳ solo el contrato; sin endpoint | `contracts.py` |
-| `GET /api/evidence/{chunk_id}` | ⏳ mencionado en `contracts.py`; sin endpoint | — |
-| Endpoint que entregue al tablero los datos de un `ViewSpec` | ⏳ no existe (la agregación sí: `aggregates.py`) | — |
-| Interfaces `chat.html` / `dashboard.html` | ❌ `static/` no existe todavía (lo mantiene otra sesión) | `routing.py` |
+| Pruebas con el modelo real | ⚠️ solo manuales (19-sep): las 423 automáticas usan modelos falsos | §11 |
+| Endpoints del tablero: `/api/components`, `/api/aggregate`, `/api/timeline`, `/api/evidence/{chunk_id}`, `/api/document/{doc_id}`, `/api/trace/{trace_id}` | ✅ hechos | `src/api/dashboard.py` |
+| `GET /api/geo` | ⚠️ existe pero responde siempre "no disponible": el corpus no tiene lugar (§14) | `dashboard.py` |
+| `GET /api/graph` (lo cita `FRONTEND.md`) | ❌ no existe | — |
+| `GET /topics` | ➖ **retirado**: se eliminó el contrato sin ruta ni consumidor (`adea37f`) | — |
+| Chat web (`chat.html`), sin CDN | ✅ hecho | `src/ui/static/` |
+| Tablero web (`dashboard.html`, Chart.js vendorizado) | ✅ hecho: abre con datos reales del corpus y sin datos de ejemplo (§14) | `src/ui/static/` |
 
-**Lo más importante que hay que saber:** el sistema completo está construido y sus
-214 pruebas pasan, **pero todas usan modelos falsos**. Al revisarlo aparecieron dos
-fallos que las pruebas originales no veían y que **ya están corregidos** (§12 #1 y #2:
-nombre de modelo y metadata en planes paralelos). Falta probar el grafo con el modelo
-real (#3) antes de la entrega de las 08:00.
+**Lo más importante que hay que saber:** el backend está construido y sus 423 pruebas
+pasan; **casi todas usan modelos falsos**, y con el modelo real solo hay pruebas manuales
+(§11). Esas pruebas manuales, hechas el 19 de septiembre con el índice de la Etapa 1, el
+encoder `bge-m3` y LiteLLM, **funcionan de punta a punta** (pregunta documental, cuantitativa
+y de vista) y confirmaron los arreglos de §12 #1 y #2. Encontraron además dos fallos nuevos
+que ninguna prueba con modelo falso podía ver (§12 #22 y #23). **El tablero web ya existe** y abre con datos reales (§14).
 
 ---
 
@@ -48,7 +52,15 @@ real (#3) antes de la entrega de las 08:00.
 | `GET /agent-card` | Agent card en JSON (formato ADL §2.3, no A2A) | ADL, expertos |
 | `GET /health` | ¿Está vivo el contenedor y con qué capacidades? | Coolify (healthcheck), humanos |
 | `GET /usage` | Consumo acumulado del proceso y eficacia del caché | Nosotros (vigilar los 100 USD) |
-| `GET /` | Sirve `chat.html` o `dashboard.html` según el `Host` | Navegador |
+| `GET /` | Sirve `chat.html` o `dashboard.html` según el `Host` (`src/ui/static/`) | Navegador |
+| `GET /api/components` | Catálogo de componentes y valores reales de cada dimensión | Tablero, agente visualizador |
+| `GET /api/aggregate` | Conteos agregados con los `doc_id` que los sustentan | Tablero |
+| `GET /api/timeline` | Serie anual de documentos, con su cobertura | Tablero |
+| `GET /api/geo` | **Siempre `disponible: false`**: el corpus no tiene lugar | Tablero |
+| `GET /api/evidence/{chunk_id}` | El fragmento exacto detrás de una cita | Tablero, chat |
+| `GET /api/document/{doc_id}` | El documento detrás de una cita, reconstruido con sus fragmentos vecinos (ver §14, "Referencias") | Chat, tablero |
+| `GET /api/trace/{trace_id}` | Árbol de ejecución de un turno reciente. **Cerrado por defecto**: solo responde con `ARPIA_DEBUG_TRACE` (expone preguntas, fragmentos y salidas del modelo) | Nosotros (depurar) |
+| `POST /api/view` | Resuelve un `ViewSpec` a los datos que el tablero debe pintar, validándolo contra el mismo esquema cerrado del visualizador | Tablero |
 
 ### Regla dura: nunca un 500 ni un 422
 
@@ -70,9 +82,14 @@ Existe y devuelve, sin autenticación:
 | `gateway_reachable` | LiteLLM responde (solo alcanzabilidad de red, no valida la key ni el modelo) |
 | `agent_card_loaded`, `agentes_registrados` | la card cargó y qué ids expone |
 | `memoria_persistente` | el checkpointer escribe en disco; `false` = la memoria vive en RAM |
+| `max_llamadas_por_turno` | tope real de llamadas al modelo por turno, calculado desde los topes del grafo (reemplaza al antiguo `max_iterations`, que ya nadie aplicaba) |
+| `debug_trace` | `true` si `/api/trace` está publicado; `/health` advierte si queda encendido |
 | `tools_registered`, `warnings` | tools disponibles y avisos legibles |
 
-Semántica: `200` con `ok`/`degraded`; **`503` solo si nada funciona**. En `stub` nunca es
+Los endpoints `/api/*` siguen la misma regla: **siempre 200**; un fallo o un dato
+inexistente llega como `{"disponible": false, "motivo": "…"}`. Detalle en §14.
+
+Semántica de `/health`: `200` con `ok`/`degraded`; **`503` solo si nada funciona**. En `stub` nunca es
 `ok`. El `HEALTHCHECK` del `Dockerfile` usa este endpoint (`raise_for_status`), por eso
 `degraded` no debe marcar el contenedor como *unhealthy*.
 
@@ -156,8 +173,10 @@ prohíbe que haya más).
   },
 
   "mode": "live",                        // "live" | "stub"
-  "citations": [ { "doc_id": "…", "chunk_id": "…", "fuente": "…", "fragmento": "…" } ],
-  "view_spec": null                      // ViewSpec (§4) solo si el turno pide una vista
+  "citations": [ { "doc_id": "…", "chunk_id": "…", "fuente": "…", "fragmento": "…",
+                   "formato": "pdf", "posicion": 12, "total_fragmentos": 87, "anio": 2019 } ],
+  "view_spec": null,                     // ViewSpec (§4) solo si el turno pide una vista
+  "trace_id": "…"                        // correlaciona con GET /api/trace/{trace_id}
 }
 ```
 
@@ -208,8 +227,9 @@ nunca declara un modelo propio.
 - **Entrada:** `ChatRequest`.
 - **Salida:** `AgentResponse` (alias `ChatResponse`) con `Evaluacion`, `ToolCall`,
   `Metadata`, `Tokens` (alias `TokenCount`), `TokensPorAgente`, `Citation`, `ViewSpec`.
-- **Operación:** `HealthResponse`, `UsageResponse`.
-- **Definido, sin endpoint aún:** `Topic`, `TopicsResponse`.
+- **Operación:** `HealthResponse` (incluye `memoria_persistente`), `UsageResponse` (incluye
+  las estadísticas del `verificador` y del caché).
+- `AgentResponse.trace_id` correlaciona cada respuesta con su árbol de ejecución.
 
 ### `ViewSpec` — la frontera de seguridad del agente visualizador
 
@@ -258,7 +278,7 @@ un acierto de caché ahorra el turno entero; la revisión de salida es la últim
 ### 5.2 En el grafo (`src/agents/graph.py`, LangGraph)
 
 ```
-START → begin → planificar → ejecutar ─┬→ componer → END
+START → begin → planificar → ejecutar ─┬→ componer → verificar → END
                     ▲                  │  (evidencia insuficiente y replans < 1)
                     └──────────────────┘
 ```
@@ -269,19 +289,43 @@ START → begin → planificar → ejecutar ─┬→ componer → END
 | `planificar` | el **orquestador** devuelve un `Plan` validado (máx. 3 pasos, agentes de la card, `paralelo`); si falla, `plan_de_respaldo` (documental) | `gpt-oss-120b` | 1 llamada |
 | `ejecutar` | corre los pasos (en paralelo si el plan lo pide) y consolida la evidencia | — | ver ejecutores |
 | `componer` | **una sola redacción** por turno con la evidencia final; añade cifras del analítico y el aviso de vista | `llama-3.3-70b-instruct` (card) | 1 llamada |
+| `verificar` | contrasta la respuesta contra su evidencia; solo llama al modelo si detecta un problema (§5.6) | `llama-3.3-70b-instruct` (card) | 0, o 1 llamada si se activa |
 | arista `tras_ejecutar` | replanifica **una** vez si ningún buscador halló evidencia (umbral 0,50) | — | — |
 
 Por qué un plan y no un bucle ReAct: el bucle hace entre 3 y 7 llamadas impredecibles; el
 Bloque B normaliza la eficiencia **contra los otros equipos**. Aquí el turno cuesta **2
-llamadas** y 3 en el peor caso.
+llamadas** y 3 en el peor caso (replanificación); el verificador suma una más **solo** si
+detecta un problema.
+
+**Presupuesto de tiempo** (`src/agents/budget.py`, `adea37f`): el turno tiene un tope total
+(`TURN_BUDGET_S`, 75 s) y `REQUEST_TIMEOUT_S` baja a 25 s por llamada. Al agotarse el tiempo no se
+replanifica, no se redacta con modelo y no se verifica: se responde con la evidencia ya recuperada. El
+frontend abandona a los 90 s.
 
 ### 5.3 Ejecutores (`src/agents/executors.py`)
 
 | Agente | Qué hace | Tokens |
 |---|---|---|
 | `agente_documental` | recupera del corpus con `corpus.recuperar()` (sobre-recupera k=40 y aplica filtro **blando** por fenómeno); la redacción es `componer` | 0 aquí |
-| `agente_analitico` | conteos exactos sobre la tabla de 1.826 documentos vía `aggregates.agregar`; la dimensión se elige por palabras clave, **sin SQL ni modelo**; declara siempre la cobertura y lo que deja fuera | 0 |
+| `agente_analitico` | conteos exactos sobre la tabla de 1.826 documentos vía `aggregates.agregar`; la dimensión la fija el plan (`Paso.group_by`) y la heurística por palabras clave es solo el respaldo; **sin SQL ni modelo**. **Cada cifra cita 3 documentos de muestra** y el turno deja `citations` y `retrieval_context` (ver abajo) | 0 |
 | `agente_visualizador` | pide un `ViewSpec` al modelo pequeño con salida estructurada y catálogo real (`componentes_disponibles`); una vista inválida se descarta y el turno sigue; impone la `nota` de cobertura temporal | 1 llamada |
+
+**Trazabilidad de las cifras.** `RETO.md` exige que todo dato mostrado se rastree a su `doc_id` y
+`chunk_id` (PDF §3.3 y B.1.3 para los datos de un componente y las variables derivadas como
+`organizacion` y `anio`). Un conteo no recupera fragmentos, pero cada cifra descansa sobre documentos
+reales, así que `analitico` los hace visibles por construcción:
+
+- **En el texto:** `- CSIS_Aerospace: 214 documentos (ej.: F2-CSIS-014, F2-CSIS-015, F2-CSIS-016)`. La cifra
+  es el conteo **total**; los tres documentos son una muestra (`MUESTRA_POR_CIFRA`), no la lista completa.
+- **En `citations`:** una cita por cifra, con el `chunk_id` del primer fragmento de ese documento y su texto
+  real (`corpus.citar_documentos`); se abre con `GET /api/evidence/{chunk_id}`. No fuerza la carga del índice
+  (si no está cargado o falla, no cita y el conteo sigue).
+- **En `retrieval_context`:** una línea por cifra (`(agregado por organizacion) CSIS_Aerospace: 214 documentos.
+  Documentos de ejemplo: …`), más la cobertura si el texto la afirma. Faithfulness se calcula contra este campo;
+  vacío, cada cifra del texto se juzga como una afirmación sin sustento. *Interpretación del equipo:* el PDF
+  dice que el campo aplica "si el agente hizo uso de recuperación"; no está confirmado cómo trata ADL un campo
+  vacío en una respuesta cuantitativa.
+- **La evidencia cubre todas las filas del texto** (antes solo las 10 primeras).
 
 Un ejecutor **nunca lanza**: un fallo degrada el turno, no lo tumba. Añadir un agente es
 registrar una función con `@registrar`, no tocar el grafo.
@@ -311,8 +355,48 @@ a una expresión regular no.
   `estado="cache:<similitud>"`. No infla cifras del turno original.
 - Sin encoder cargado cae a coincidencia exacta sobre el texto normalizado. El caché
   **nunca** provoca la carga del modelo. No se cachean errores ni rechazos.
-- ⚠️ **El caché es global y compara solo el texto de la pregunta**, no la conversación.
-  Ver hallazgo §12 #7.
+- **Distingue conversaciones** (`adea37f`): un primer turno acierta contra cualquier sesión; un
+  seguimiento solo dentro de la suya ("¿y en 2023?" tiene el mismo texto en dos hilos y significa cosas
+  distintas).
+- ⚠️ Guarda como buena la respuesta del plan de respaldo (§12 #23).
+
+### 5.6 Verificador (`src/agents/verifier.py`) — condicional, 0 tokens si la respuesta está sana
+
+Corre al final del turno (`componer → verificar`). Detecta afirmaciones que la evidencia no
+respalda, con una comparación de conjuntos que **no cuesta tokens**: solo cuando falla paga
+una llamada para corregir. Dos disparadores, ambos de alta precisión a propósito:
+
+- **Cita fabricada:** la respuesta menciona un `doc_id` (`F1-XXXX-001`) que no está en la
+  evidencia del turno.
+- **Cero citas con evidencia disponible**, y solo si la respuesta tiene ≥ 240 caracteres: se
+  recuperó material y la respuesta no se apoya en ninguno.
+
+Si no puede corregir, **degrada** la respuesta a "no hay evidencia suficiente" en vez de
+devolver una cita inventada. Se descartó "puntaje de recuperación bajo" como disparador: una
+pregunta fuera de dominio puntúa 0,552 y la peor legítima 0,606; cinco centésimas no separan
+nada. `GET /usage` expone `verificador` (turnos, activaciones, tasa): si la tasa se acerca a
+1, el disparador está mal puesto y se paga una llamada extra por turno.
+
+**Conteos exactos.** La evidencia agregada del analítico (`chunk_id` sintético `agregado:…`) no se
+somete a la exigencia de citar: `sin_citas` mira solo la evidencia documental. Pero los `doc_id` de muestra
+que el analítico cita **sí cuentan como disponibles** para decidir si una cita es fabricada, porque son
+documentos reales. Sin esto, cada respuesta cuantitativa trazable se leería como "cita fabricada" y se
+reescribiría con un modelo. La trazabilidad de las cifras la garantiza el propio agente (§5.3), no una
+revisión con modelo.
+
+El verificador **está declarado en la agent card** (`adea37f`) con el modelo de `agente_documental`, y
+aparece en `agentes_invocados` y `tokens_por_agente` solo cuando llama al modelo.
+
+### 5.7 Voz del sistema (`src/agents/voz.py`)
+
+Desde `cacadf9` y `c92029b`, todo el texto que lee el usuario nace de un solo módulo: el **registro** que
+comparten los prompts y las ocho respuestas fijas (rechazos, degradaciones). Es un registro de producto
+analítico: conclusión primero, impersonal, procedencia caracterizada (`AI Index Stanford (2018,
+F1-AIINDEX-016)` en vez de un identificador opaco) y lo no cubierto por el corpus en su propio párrafo. **Sin
+pronósticos ni escalas estimativas** (`RETO.md` prohíbe fabricar una medición) y con **neutralidad técnica**
+explícita (Toxicity es el 15% del bloque de calidad y el corpus trata de actores armados y capacidades
+antisatélite). El orquestador, el redactor, el verificador y el visualizador usan el mismo registro (el del
+visualizador es una versión breve). Coste medido por el equipo: ~20% más de tokens por redacción.
 
 ---
 
@@ -327,11 +411,12 @@ cada agente, con `LLM_MODEL` solo como respaldo.
 
 | Id | Modelo declarado (lo que se reporta) | Tools declaradas | Id enviado a LiteLLM |
 |---|---|---|---|
-| `orquestador` | `gpt-oss-120b` | `delegar_documental`, `delegar_visualizacion` | `gpt-oss-120b` |
+| `orquestador` | `gpt-oss-120b` | `delegar_documental`, `delegar_visualizacion`, `delegar_analitico` | `gpt-oss-120b` |
 | `agente_documental` | `llama-3.3-70b-instruct` | `buscar_corpus`, `detalle_documento` | ✅ traducido: se envía `meta.llama3-3-70b-instruct` |
 | `agente_visualizador` | `gpt-oss-20b` | `componentes_disponibles`, `emitir_view_spec` | `gpt-oss-20b` |
 | `agente_analitico` | `gpt-oss-20b` | `consultar_agregado` | `gpt-oss-20b` (0 tokens: no llama al modelo) |
 | `guardian`, `memoria` | — (deterministas) | no van en la card; **sí** aparecen en `agentes_invocados` | — |
+| `verificador` | `llama-3.3-70b-instruct` | — (sin tools) | `meta.llama3-3-70b-instruct` |
 
 **Dos nombres para un mismo modelo.** La card usa el nombre del PDF de ADL, que es el
 que ADL cruza para calcular el costo y el que se **reporta** en `tokens_por_agente`
@@ -370,7 +455,7 @@ requests simultáneas no mezclen su evaluación** (ADL puede mandar preguntas en
 |---|---|
 | `turnlog.py` | tools llamadas, `retrieval_context`, `citations` (deduplicadas por `chunk_id`) |
 | `usage.py` | tokens y llamadas, **con desglose por agente y modelo**; cuenta la llamada aunque el proveedor no devuelva cifras (los tokens quedan en 0, nunca inventados) |
-| `tracing.py` | spans jerárquicos de la trayectoria (depuración) |
+| `tracing.py` | spans jerárquicos de la trayectoria; conserva las **últimas 50 trazas** en memoria, consultables por `GET /api/trace/{trace_id}` |
 
 Un `ContextVar` **no se propaga** a los hilos de un `ThreadPoolExecutor`. `graph.ejecutar`
 usa uno cuando el plan tiene 2 o más pasos en paralelo, así que **lanza cada tarea con su
@@ -389,9 +474,20 @@ acumuladores mutables del turno. Como varios hilos escriben en ellos a la vez,
   señala en el Bloque B.
 - **Carga del encoder al arrancar:** la primera carga descarga ~2 GB y tarda ~90 s. Se hace
   en `lifespan` → `encoder.warmup()` en un hilo aparte, para que un evaluador nunca la pague
-  como latencia. **El índice, en cambio, se carga en la primera llamada** (ver §12 #8).
+  como latencia. El arranque también precalienta el índice y la tabla de agregados (`adea37f`), así que `/health` ya no carga 1,3 GB en su
+  primera llamada.
 - **`aggregates.py`:** conteos y frecuencias sobre la tabla de 1.826 documentos, sin SQL;
   cada resultado trae los `doc_id` que lo sustentan y la cobertura del dato.
+- **`index.chunk(chunk_id)`** devuelve un fragmento por su id (lo usa `GET /api/evidence`). Es de **acceso
+  directo**: el JSONL agrupa cada documento en un bloque contiguo y ordenado (comprobado sobre las 326.866
+  filas: sin documentos partidos, `chunk_id = <doc>__chunk_<orden>`, `posicion` = orden), así que el fragmento
+  `n` está en la fila `primera + n`. Si el id no cumple esa forma, recorre el bloque como antes. Importa porque
+  un documento (un CSV) llega a **76.220 fragmentos**.
+- **`index.chunks_of(doc_id, desde, hasta)`** y **`index.n_chunks(doc_id)`** (lo usa `GET /api/document`). Toda fila
+  que sale del índice lleva `total_fragmentos`.
+- **El tablero depende del índice.** `aggregates.tabla()` se construye desde `_get_index().document_table()`. Si el
+  índice no está, **ya no se cachea una tabla vacía** (`adea37f`): los endpoints responden `disponible: false` y
+  reintentan en la siguiente petición.
 - **Modo stub:** `/health` no carga el índice.
 
 ---
@@ -413,8 +509,9 @@ credenciales nunca van en el código ni en la imagen.
 | `CHECKPOINT_PATH` | archivo SQLite de la memoria conversacional | `state/checkpoints.sqlite` |
 | `AGENT_CARD_PATH` | ruta de la card | `agent_card.json` |
 | `SESSION_TTL_S` | vida de la cookie de sesión | `3600` |
-| `MAX_AGENT_ITERATIONS` | tope de iteraciones | `6` |
-| `REQUEST_TIMEOUT_S` | timeout de **cada** llamada al modelo | `60` |
+| `ARPIA_DEBUG_TRACE` | publica `GET /api/trace` (preguntas, fragmentos y salidas del modelo). **Solo desarrollo; vacío en el despliegue evaluado** | vacío |
+| `REQUEST_TIMEOUT_S` | timeout de **cada** llamada al modelo | `25` |
+| `TURN_BUDGET_S` | presupuesto total de un turno; al agotarse no se empieza nada caro nuevo | `75` |
 | `LOG_LEVEL` | nivel de log | `INFO` |
 
 > ⛔ **`ARPIA_MODE=live` antes de las 08:00 del sábado.** En `stub` el endpoint responde
@@ -432,7 +529,8 @@ credenciales nunca van en el código ni en la imagen.
 
 - **Un solo contenedor, tres dominios.** `agent.*`, `frontagent.*` y `dashboard.*` apuntan
   al mismo servicio; `routing.py` decide qué HTML servir en `/` según el `Host`
-  (`dashboard.*` → tablero; cualquier otro → chat).
+  (`dashboard.*` → `dashboard.html`; cualquier otro → `chat.html`). Los archivos viven en
+  `src/ui/static/` y entran a la imagen con `COPY . .`. `dashboard.html` existe (rama `JuanE`, ya integrada en `main`); si faltara en la imagen, `dashboard.*` respondería 200 con un aviso.
 - **Coolify:** build pack `Dockerfile`, Base Directory `/arpia`, puerto `8000`, `www
   redirect` en *No redirect*. El `Dockerfile` hace `COPY . .` y **la frontera de qué entra
   la define `.dockerignore`**.
@@ -465,35 +563,53 @@ cp .env.example .env                                        # y rellenar; ARPIA_
 uv run uvicorn src.api.main:app --reload --port 8000
 
 uv run ruff check src tests --fix && uv run ruff format src tests
-uv run pytest tests -q                                      # 214 casos
+uv run pytest tests -q                                      # 319 casos
 ```
 
-214 casos en total (algunas funciones están parametrizadas; la columna cuenta funciones).
+319 casos en total (algunas funciones están parametrizadas; la columna cuenta funciones).
 
 | Archivo de pruebas | Qué protege | Funciones |
 |---|---|---|
 | `test_contract.py` | contratos, alias, `ViewSpec` cerrado, validador de tokens | 27 |
-| `test_graph.py` | plan, replanificación única, coste por turno, memoria, aislamiento de sesiones | 24 |
+| `test_graph.py` | plan, replanificación única, coste por turno, memoria, aislamiento de sesiones | 27 |
 | `test_modelos.py` | nombre de la card → id de LiteLLM; los clientes reales reciben el id traducido | 7 |
 | `test_paralelo.py` | un plan paralelo no pierde `tools_called`, contexto ni tokens; sin mezcla entre turnos | 4 |
 | `test_e2e_metadata.py` | un turno completo por `run_chat` con grafo real: lo que lee ADL | 1 |
-| `test_executors.py` | documental, analítico y visualizador | 21 |
-| `test_chat.py` | formato ADL, sesión, `thread_id`, requests simultáneas, degradación | 16 |
-| `test_memory.py` | caché semántico: umbral, tope, cero falsos aciertos | 13 |
+| `test_executors.py` | documental, analítico y visualizador | 31 |
+| `test_chat.py` | formato ADL, sesión, `thread_id`, requests simultáneas, degradación | 17 |
+| `test_memory.py` | caché semántico: umbral, tope, cero falsos aciertos | 16 |
 | `test_guardian.py` | ataques rechazados **y** consultas legítimas que no deben rechazarse | 11 |
 | `test_enrich.py` | `organizacion` y `anio` derivados | 8 |
+| `test_dashboard.py` | endpoints `/api/*`: nunca 500, cobertura, trazabilidad, `geo` no disponible | 23 |
+| `test_verifier.py` | disparadores del verificador, degradación y que no salte en respuestas sanas ni en conteos | 13 |
+| `test_voz.py` | la voz del sistema vive en un solo módulo; ningún prompt define su propio tono | 15 |
+| `test_trazabilidad_analitico.py` | cada cifra cita sus documentos; `citations` y `retrieval_context` llenos; el verificador no reescribe un conteo trazable; el conteo no se cae si el índice falla | 12 |
 | `test_theme.py` | ningún color hexadecimal fuera de `src/theme/` | 6 |
+| `test_frontend_referencias.py` + `tests/js/` | la lógica pura del tooltip y del visor (partir el texto por `doc_id`, describir una cita, paginar), con `node --test`; se omite si no hay Node | 1 (22 en JS: referencias y traducción de `/api/aggregate`) |
+| `test_tablero_sin_datos_inventados.py` | el tablero no trae series, marcadores ni nodos de ejemplo ni depende de un mapa externo, y abre con las vistas del corpus | 4 |
+| `test_referencias.py` | citas con `formato`/`posicion`/`total_fragmentos`; lectura por posición sobre un `VectorIndex` real pequeño; `/api/document` (ventana, bordes, tope, fragmento ajeno, doc desconocido, recorte); ids hostiles o truncados no abren otro fragmento | 28 |
 
 > Las pruebas de `test_graph.py` cuentan llamadas con **contadores del LLM falso**; no leen
 > `turnlog` ni `usage`. Por eso no detectaban el fallo de §12 #2; `test_paralelo.py` y
 > `test_e2e_metadata.py` sí lo leen (y se comprobó que fallan si el bug se reinstala).
 > Sigue sin detectarse lo de §12 #4 (`tools_called` del documental).
 
-### Prueba de escritorio con modelo real (única hecha, previa a las Fases 3 y 4)
+### Pruebas manuales con el modelo real (19 de septiembre)
 
-`POST /chat` con `"Hola mundo"`, `ARPIA_MODE=live`, `gpt-oss-20b` vía LiteLLM: HTTP 200,
-formato ADL completo, `tokens.total` = input + output (741), `X-Session-Id` devuelto.
-**El grafo actual (plan + ejecutores) aún no se ha probado con el modelo real.**
+Con el índice de la Etapa 1 (326.866 fragmentos), `bge-m3` en CPU y LiteLLM (`gpt-oss-120b`,
+`gpt-oss-20b`, `llama-3.3-70b-instruct`), servidor en modo `live`:
+
+| Pregunta | Resultado |
+|---|---|
+| Documental ("¿qué reporta el corpus sobre capacidades antisatélite?") | 12 s, 3.561 tokens, respuesta redactada con `doc_id` reales, 8 fragmentos en `retrieval_context` y 8 citas |
+| Cuantitativa ("¿cuántos documentos hay por fenómeno?") | antes de `c9f48f5`: 3 s, 896 tokens, 1 llamada, F3 = 888, F2 = 479, F1 = 459 (suman 1.826). **Después de `c9f48f5` fallaba el orquestador (§12 #22, ya resuelto):** con el arreglo, el conteo sale del analítico por `/chat` con `doc_id` en cada cifra |
+| Vista ("grafica la cantidad de documentos por organizacion") | `ViewSpec` válido con `gpt-oss-20b`; con la trazabilidad de §5.3: 2.342 tokens, sin llamar al verificador, 20 cifras con 20 citas y 20 líneas de contexto |
+| Seguimiento ("resúmelo en una sola frase") | Antes: no usaba la conversación y buscaba la frase literal (3 llamadas, 4.442 tokens, documentos sin relación). **Ahora (§12 #24):** el orquestador reescribe la búsqueda como "Resumen en una sola frase del corpus sobre capacidades antisatélite" y responde sobre el tema correcto (2 llamadas, 4.909 tokens en total). El redactor aún desarrolla más de una frase: su estructura fija manda |
+| Caché semántico | un acierto sirvió la respuesta en 0 tokens |
+
+Confirmado con el proxy real: la traducción de modelos (§6), la salida estructurada del `Plan` y del
+`ViewSpec`, y `memoria_persistente: true`. **No confirmado:** el comportamiento con las preguntas
+que evaluará ADL (batería propia de preguntas y ataques) ni la carga concurrente.
 
 ---
 
@@ -501,32 +617,68 @@ formato ADL completo, `tokens.total` = input + output (741), `X-Session-Id` devu
 
 Ordenados por impacto en la nota. Los #1 a #4 salieron de revisar el código de las Fases 3
 y 4 y no los detectaban las pruebas originales. **#1 y #2 ya están corregidos**; #3 y #4
-siguen abiertos.
+siguen abiertos. Del #9 al #13 se atendieron con la Fase 5, y Davinson cerró en `cfa7c79` y `adea37f` los
+pendientes #6, #7, #8, #9, #16, #17, #21 y la delegación de #4 (ver cada fila); del #16 al #24
+son nuevos (el #22, #23 y #24 salieron de las pruebas con el modelo real).
+
+Los tres hallazgos de las pruebas con el modelo real del 19 de septiembre —el orquestador y la
+clave `Pasos`, el caché que guardaba el plan de respaldo, y los agentes que no leían la
+conversación— están cerrados y documentados en las filas #22, #23 y #24. El documento de
+traspaso que los seguía (`PENDIENTES_AGENTES.md`) se eliminó al quedarse sin pendientes
+abiertos; sus mediciones de despliegue viven en [`DEPLOY.md`](DEPLOY.md) §3.1.
 
 | # | Tema | Por qué importa | Arreglo propuesto |
 |---|---|---|---|
 | 1 | ✅ **CORREGIDO.** **El modelo del documental no existe en LiteLLM.** La card dice `llama-3.3-70b-instruct`; LiteLLM acepta `meta.llama3-3-70b-instruct`. `redactar()` captura la excepción y entrega fragmentos crudos con `estado: ok` | En `live`, **toda** respuesta documental saldría sin redactar: se pierden Tono (25%) y Answer Relevancy. Falla en silencio | Hecho: `card.gateway_model_for` traduce el nombre de la card al id de LiteLLM (§6); lo reportado sigue siendo el nombre de la card. Override en Coolify con `MODEL_ALIASES`. Falta confirmar con una llamada real de 1 token |
 | 2 | ✅ **CORREGIDO.** **Se pierde la metadata en planes paralelos.** `graph.ejecutar` usa `ThreadPoolExecutor` y los `ContextVar` de `turnlog`/`usage` no llegan a esos hilos. Demostrado: con 2 pasos, `tools_called=[]`, `tokens_por_agente=[]`, `num_interacciones=0` | Un plan con 2+ pasos (comparaciones, "datos + vista") pierde `retrieval_context` (**Faithfulness, 30% del Bloque A**), `citations` y los tokens del visualizador (Bloque B) | Hecho: cada tarea corre con `contextvars.copy_context().run`, más candados en `usage`/`turnlog`. Pruebas en `test_paralelo.py` y `test_e2e_metadata.py` |
-| 3 | **Nada probado con el modelo real.** `with_structured_output(Plan)` y `(ViewSpec)` dependen de que LiteLLM y `gpt-oss` soporten salida estructurada | Si falla, el orquestador cae siempre al plan de respaldo y el visualizador nunca emite vista (55% del Reto 2) | Prueba en `live` con `gpt-oss-20b` (barata) sobre 1 pregunta documental, 1 cuantitativa y 1 de vista |
-| 4 | **`tools_called` no refleja la recuperación.** El documental llama a `recuperar()` directo, no a la tool `buscar_corpus`; el stub sí la anota. El orquestador tampoco anota `delegar_*` | La card promete `buscar_corpus` y `delegar_*`; la traza no los muestra. Es una inconsistencia detectable en el Bloque D | Anotar `buscar_corpus` dentro de `recuperar()`, y o bien anotar `delegar_*` en `planificar` o ajustar la card a lo que existe |
+| 3 | ✅ **Probado con el modelo real (19-sep).** La salida estructurada del `Plan` y del `ViewSpec` funciona en LiteLLM con `gpt-oss`, con una excepción (#22) | — | Falta una batería propia de preguntas y ataques |
+| 4 | ✅ **HECHO en `c9f48f5` y `cfa7c79`.** `recuperar()` registra `buscar_corpus` y cada delegación del orquestador queda como `delegar_*` en `tools_called` (con los argumentos que declara la card) | — | Comprobado con el modelo real para la búsqueda documental |
 | 5 | **Índice y encoder en Coolify** | Sin índice, `/chat` cae siempre a `error_grafo` | Crear los 3 *Storages* de §10 y las variables como *Runtime* |
-| 6 | **Tope de tiempo por turno** | Hoy cada llamada tiene 60 s; el peor caso son 3 llamadas más recuperación. Un turno que exceda el timeout del evaluador se pierde | Plazo global por turno en `run_chat` que degrade a `_retrieval_fallback` |
-| 7 | **El caché ignora la conversación.** Compara solo el texto: "¿y en 2023?" puede recibir la respuesta cacheada de otra conversación | Devuelve una respuesta de otra pregunta con `estado: cache:0.96` | No cachear turnos que dependan del historial (con hilo previo), o incluir el hilo en la clave |
-| 8 | **`/health` carga el índice en su primera llamada.** `_check_index` → `check()` → `_load()` (1,3 GB) puede exceder los 5 s del healthcheck | Un healthcheck que falla en el arranque puede marcar el despliegue como fallido | Precalentar el índice en `lifespan`, junto al encoder |
-| 9 | `GET /topics` | El frontend lo necesita; solo existe el contrato | Endpoint con los 3 fenómenos y conteos reales |
-| 10 | `GET /api/evidence/{chunk_id}` | Trazabilidad del tablero (`RETO.md`) | Endpoint que devuelva texto, `doc_id`, fuente y posición |
-| 11 | **Endpoint de datos del tablero** | `aggregates.py` ya calcula los conteos; falta exponerlos: dado un `ViewSpec`, devolver los datos con `doc_id`/`chunk_id` | `POST /api/view-data` reutilizando `aggregates.agregar` |
+| 6 | ✅ **HECHO en `adea37f`.** Presupuesto de tiempo por turno (`budget.py`) | Antes el peor caso eran 3 × 60 s y el frontend abandona a los 90 s | `TURN_BUDGET_S=75`, `REQUEST_TIMEOUT_S=25` y tres puntos de control. Falta medirlo con el modelo real |
+| 7 | ✅ **HECHO en `adea37f`.** El caché distingue conversaciones | Antes un seguimiento ("¿y en 2023?") podía recibir la respuesta cacheada de otra conversación | Un primer turno acierta contra cualquier sesión; un seguimiento solo dentro de la suya |
+| 8 | ✅ **HECHO en `adea37f`.** El arranque precalienta índice, tabla y encoder | `/health` cargaba 1,3 GB en su primera llamada y podía superar los 5 s del healthcheck | — |
+| 9 | ✅ **HECHO en `adea37f`.** Se retiró el contrato muerto de `/topics` | Sin ruta y sin consumidor | — |
+| 10 | ✅ **HECHO en la Fase 5.** `GET /api/evidence/{chunk_id}` | Trazabilidad del tablero (`RETO.md`) | Existe (`dashboard.py`); falta que el chat lo use al hacer clic en una cita (#20) |
+| 11 | ✅ **HECHO en la Fase 5.** Endpoint de datos del tablero | Los datos de un `ViewSpec` salen de `GET /api/aggregate` y `/api/timeline`, con `doc_id` y cobertura | Existe; falta el mapeo `ViewSpec → endpoint` en el frontend (§14) |
 | 12 | **Documento de arquitectura y propuesta de diseño por fenómeno**, dentro del repo y fuera de `docs/` | Entregable: vale el Bloque D (20%) y el 40% del Reto 2. `docs/architecture.md` está obsoleto | Redactarlo con la justificación de cada decisión de §13 |
-| 13 | `static/chat.html` y `static/dashboard.html` | `routing.py` degrada a un aviso legible mientras no existan | Lo mantiene otra sesión |
+| 13 | ✅ **Resuelto.** `chat.html` y `dashboard.html` existen (Chart.js vendorizado) y el tablero abre con datos reales | — | — |
 | 14 | Umbral de evidencia `0,50` sin recalibrar | El propio código lo marca; si salta siempre, gasta una llamada extra por turno | Recalibrar con consultas reales (Fase 5) |
 | 15 | Batería de prompt injection end-to-end contra el endpoint | Es el 15% del total del Reto 1 | Script con ataques propios sobre el endpoint desplegado |
+| 16 | ✅ **HECHO en `adea37f`.** El verificador está declarado en `agent_card.json` | ADL cruza los ids de `agentes_invocados` y `tokens_por_agente` contra la ficha | — |
+| 17 | ✅ **HECHO en `adea37f`.** La tabla del corpus no se cachea vacía | Antes, si el volumen del índice no estaba al llegar la primera petición, el tablero quedaba en blanco hasta reiniciar | Los endpoints responden `disponible: false` |
+| 18 | ✅ **RESUELTO.** `FRONTEND.md` contradecía al backend en 9 puntos (§14): `fenomeno=` vs `fenomenos=`, citas con `quote`/`score`, `chart: "map"`, `lugar`, `group_by: "mes"`, fechas completas, `/api/graph`, `static/` vs `src/ui/static/`, Plotly/Leaflet vs Chart.js | Quien construyera el tablero con esa guía escribía código que el backend rechaza o ignora | Corregido con la tabla de §14: estructura real de archivos, vocabulario cerrado del `ViewSpec`, campos reales de `citations`, endpoints con sus parámetros verdaderos. La tabla de §14 se conserva como registro de qué decía antes |
+| 19 | ✅ `/api/trace` **cerrado en `86e8244`** (solo con `ARPIA_DEBUG_TRACE`). El resto de `/api/*` sigue siendo público y de solo lectura, en los tres dominios | Lo público ya no expone preguntas ni salidas del modelo | Confirmar que `ARPIA_DEBUG_TRACE` queda vacío en Coolify |
+| 20 | ✅ **Resuelto en el chat.** Antes el chat no usaba `/api/evidence`: hacer clic en una cita no abría el fragmento, y faltaban el tooltip y el visor que sugirió ADL | `FRONTEND.md` lo llama "requisito obligatorio de la especificación" | `js/referencias.js` (tooltip y visor), `obtenerEvidencia` y `obtenerDocumento` en `api.js`, enganche en `chat.js`. Detalle en §14, "Referencias". El tablero también las usa (respuestas del asistente y sección "Fuente") |
+| 21 | ✅ **Resuelto con el presupuesto de tiempo (#6).** Timeout del front (90 s) vs peor caso del backend | — | — |
+| 22 | ✅ **Resuelto.** El orquestador fallaba con el modelo real: `gpt-oss-120b` devolvía la clave `Pasos` (el `title` del esquema) y `Plan` (`extra="forbid"`) la rechazaba, con lo que el respaldo mandaba todo al documental. Medido antes: 1 de 6 llamadas válidas; después: 6 de 6, y las tres preguntas típicas responden por `/chat` con el agente correcto | — | `plan.py`: `Plan` y `Paso` normalizan las claves (`Pasos` → `pasos`, `Group By` → `group_by`) y siguen rechazando campos inexistentes. `plan_de_respaldo` manda el conteo inequívoco al analítico (y suma el visualizador si piden una gráfica). `executors._dimension` ya no depende de las tildes. No se añadió reintento: la causa raíz está cerrada y cada reintento costaría tokens |
+| 23 | ✅ **Resuelto.** El caché guardaba como buena la respuesta del plan de respaldo (`estado: ok`) y repetir la pregunta la devolvía con `cache:1.00` hasta reiniciar | — | `planificar` anota `turnlog.marcar_no_cacheable("plan_de_respaldo")` en sus dos salidas al respaldo y `run_chat` no guarda en el caché un turno marcado (queda en el log). El `estado` sigue siendo `ok`. Cualquier agente puede usar la misma marca para otros degradados |
+| 24 | ✅ **Resuelto.** Ningún agente leía la conversación: el historial se guardaba en SQLite pero `planificar` y `redactar` solo recibían la pregunta, así que un seguimiento ("resúmelo", "¿y en 2023?") buscaba la frase literal y respondía sobre otro tema | ADL evalúa preguntas sueltas (no cambia la nota); el chat de la demo sí lo necesita | `memory.conversacion_previa` arma las últimas 2 vueltas (400 caracteres por mensaje, sin mensajes de tools ni la pregunta actual). `planificar` y `redactar` la reciben y el orquestador reescribe el seguimiento como consulta autónoma. **Primer turno de una sesión: cero tokens extra.** Límite conocido: el redactor no obedece del todo un formato como "en una frase" |
+| 25 | ✅ **Resuelto.** Una comparación entre dos temas perdía uno de los lados: la evidencia de los pasos se ordenaba por puntaje y el redactor (que ve 8 fragmentos) recibía 8 de IA y **0 de satélites**; la respuesta afirmaba que el corpus no decía nada sobre satélites. Medido contra el despliegue y reproducido con el índice real | Toda pregunta de comparación ("compara…") con temas de puntajes distintos daba una respuesta falsa | `graph.ejecutar` intercala la evidencia por pasos (cada uno aporta su mejor fragmento por turnos) en vez de ordenarla globalmente. Con un solo paso el orden es el de siempre |
+| 26 | ✅ **Resuelto.** Una pregunta fuera de dominio ("¿quién ganó el Mundial?") hacía que el orquestador respondiera en texto ("Lo siento, pero…"), el JSON no validaba, caía al respaldo documental, buscaba material sin relación y gastaba **8.879 tokens** para una respuesta rara | Eficiencia (tokens) y tono | `Plan.pasos = []` es ahora la forma de declarar una consulta ajena (regla en el prompt del orquestador). El grafo responde `voz.FUERA_DE_DOMINIO` sin buscar ni redactar: **1.121 tokens**, 1 llamada. En una replanificación un plan vacío sigue siendo un fallo, y ante la duda se planifica el documental (una pregunta general sobre satélites SÍ es del dominio) |
+| 27 | ✅ **Resuelto.** El redactor ignoraba un formato pedido ("resúmelo en una sola frase"): la estructura fija (conclusión, desarrollo, lo no cubierto) siempre ganaba | Relevancia de la respuesta | `REDACCION_PROMPT` gana "FORMATO PEDIDO": una extensión o forma explícita manda sobre la estructura. Costo: cero tokens |
+| 28 | ✅ **Resuelto.** El texto de un conteo salía sin tildes ("por anio", "por organizacion"), con "1 documentos" y la serie por año ordenada por cantidad | Tono (25 % de la calidad) | `executors.analitico`: nombres en castellano, singular y orden cronológico para el año. `group_by` sigue siendo el identificador del vocabulario cerrado |
 
 ### Documentos del repo que están desactualizados
 
 - `arpia-bundle/AGENTS.md` §7 dice "código bajo Apache 2.0 / repo público" y habla de un
   "gateway"; **`RETO.md` manda**: repositorio **privado**, modelos vía LiteLLM/Bedrock.
-- `src/api/CONTRATO_GRAFO.md`: describe el grafo anterior; los "tres problemas de memoria"
-  que enumera ya los corrigió la Fase 3.
+
+Corregidos el 19 de septiembre, ya alineados con el código:
+
+- `src/api/CONTRATO_GRAFO.md`: los "tres problemas de memoria" que enumeraba los cerró la
+  Fase 3 (el nodo `begin` de `graph.py`). Ahora describe la solución que está en el código.
+- `FRONTEND.md`: discrepaba del backend en los nueve puntos de §14. Reescritas las secciones
+  de estructura, endpoints, `ViewSpec` y contrato de `citations`.
+- `README.md` (este repo y el raíz): la estructura de `src/` estaba incompleta y presentaban
+  Streamlit como la interfaz del sistema, cuando lo que se despliega es `src/ui/static/`.
+- `arpia-bundle/CLAUDE.md` y `AGENTS.md`: declaraban Streamlit como frontend del proyecto y
+  listaban módulos de tema que ya no existen.
+
+Eliminados el 19 de septiembre, por describir cosas que dejaron de existir:
+
+- `PENDIENTES_AGENTES.md` (traspaso sin pendientes abiertos), `docs/design/reference-notes.md`,
+  `arpia-bundle/docs/architecture.md` (stub de redirección), los cinco resúmenes de las
+  conferencias de la Etapa 2, y las skills `streamlit-app-design` y `data-viz-plotly`.
 
 ---
 
@@ -550,6 +702,10 @@ siguen abiertos.
   `ViewSpec` recortado a lo que el corpus soporta; cobertura del 34% declarada siempre.
 - **Un contenedor, tres dominios.** Menos piezas que puedan caerse en la ventana de
   evaluación.
+- **Trazabilidad por construcción, no por revisión.** Toda cifra que se muestra cita los documentos que la
+  sustentan (§5.3). Se descartó eximir a los conteos de citar: `RETO.md` exige rastrear "todo dato mostrado" a
+  su `doc_id` y `chunk_id`, y el verificador solo detecta el hueco, no lo cierra. El ahorro de tokens que
+  resulta (el verificador ya no se activa en un conteo trazable) es una consecuencia, no el objetivo.
 
 ### Historia (para ubicar los commits)
 
@@ -563,3 +719,168 @@ siguen abiertos.
 | `b2672e8` | checkpointer SQLite en volumen propio; `requirements` con `--extra retrieval` |
 | `418aa0e` Fase 3 | orquestador de plan único con memoria conversacional |
 | `1f23b11` Fase 4 | los tres ejecutores, con el coste del turno acotado |
+| `1c1466e` Fase 5 | verificador condicional, traza consultable (`/api/trace`) y endpoints del tablero (`dashboard.py`) |
+| `01efafa` (PR #3) | corrige el modelo del documental (nombre de la card → id de LiteLLM) y la metadata perdida en planes paralelos |
+| `5c83a71` | frontend del chat en HTML plano (`src/ui/static/`), sin CDN |
+| `c9f48f5` | `tools_called` registra la recuperación; `agentes_invocados` incluye al analítico; `Paso.group_by` |
+| `8d96e8d` | el verificador no exige citas a la evidencia agregada; `cobertura.excluidos_por_fecha` |
+| `86e8244` | `/api/trace` cerrado por defecto; `POST /api/view` |
+| `4ae60f9` | preflight en verde; `/health` expone `max_llamadas_por_turno` |
+| `29bdf0f` | cada cifra de un conteo cita los documentos que la sustentan (`citations`, `retrieval_context`) |
+| `cfa7c79` | las delegaciones del orquestador quedan en `tools_called`; la card gana `delegar_analitico` |
+| `adea37f` | presupuesto de tiempo por turno, caché por conversación, arranque que precalienta, verificador en la card |
+| `cacadf9` | `voz.py`: el texto que lee el usuario nace de un solo módulo, con registro de producto analítico |
+| `c92029b` | los cuatro prompts (orquestador, redactor, verificador, visualizador) usan la misma voz |
+
+---
+
+## 14. Frontend y tablero (`src/ui/static/`)
+
+`FRONTEND.md` es la guía del equipo de frontend. Este apartado dice **qué existe de verdad** y
+dónde esa guía no coincide con el backend.
+
+### Qué hay
+
+| Pieza | Estado |
+|---|---|
+| `chat.html`, `css/tokens.css`, `css/app.css`, `js/api.js`, `js/chat.js` | ✅ existen |
+| `dashboard.html`, `css/tablero.css`, `js/dashboard.js`, `js/viewspec.js` | ✅ existen; el tablero abre con datos reales y sin datos de ejemplo |
+| `vendor/` | Chart.js ✅ en uso; Leaflet sigue en el repo pero **ya no se carga** (el corpus no tiene lugar) |
+| `charts.js`, `map.js`, `graph.js` | ➖ no existen ni hacen falta: los gráficos viven en `dashboard.js`; mapa y grafo no tienen datos |
+| Streamlit (`src/ui/app.py`) | ➖ **eliminado** (19-sep): la interfaz es `src/ui/static/`. Con él se fueron `streamlit_theme.py`, `plotly_theme.py` y las dependencias `streamlit`, `plotly` y `pandas` |
+
+- **HTML plano, sin framework, sin build.** `chat.html` no tiene ninguna referencia externa
+  (verificado): sirve aunque la red del venue falle. `FRONTEND.md` prohíbe CDN y exige
+  vendorizar las librerías.
+- **Una sola capa de red.** `api.js` es el único que hace `fetch()`; expone `enviarChat`
+  (timeout de 90 s) y `obtenerSalud`. Manda `{texto, sesion_id}` a `/chat`.
+- **Lee los campos reales del backend:** `metadata.agentes_invocados`, `num_interacciones`,
+  `latencia_ms`, `tokens`, `estado`, `mode`, `citations[].doc_id/chunk_id/fuente/fragmento`
+  y `view_spec`.
+- **Cómo se sirve:** `routing.py` monta `src/ui/static/` dos veces (`/static/...` y `/...`) y
+  responde `/` según el `Host`. Como la API y la interfaz salen del mismo contenedor, no hay
+  CORS ni URL que configurar.
+
+### Endpoints del tablero (`src/api/dashboard.py`)
+
+Todos devuelven **HTTP 200**. Un fallo o un dato inexistente llega como
+`{"disponible": false, "motivo": "…"}`, para que el tablero distinga "no hay dato" de
+"el servicio se cayó". Todos cuestan **0 tokens**.
+
+| Endpoint | Parámetros | Devuelve |
+|---|---|---|
+| `GET /api/components` | — | catálogo: `componentes`, `metricas`, `agrupaciones`, valores reales de cada dimensión y una `nota` de cobertura |
+| `GET /api/aggregate` | `metrica`, `group_by`, `fenomenos` (`F1,F2`), `organizacion`, `desde`, `hasta` (años enteros), `limite` (1–100, def. 25) | `filas[{clave, valor, doc_ids}]`, `total`, `cobertura{documentos_universo, documentos_en_dimension, documentos_contados, sin_dato_en_la_dimension}` |
+| `GET /api/timeline` | `fenomenos`, `desde`, `hasta` | serie anual ordenada, `granularidad: "anio"`, `cobertura` y un `aviso` con el 34% |
+| `GET /api/geo` | — | **siempre `disponible: false`**: la metadata no tiene lugar, país ni coordenadas |
+| `GET /api/evidence/{chunk_id}` | — | `chunk_id`, `doc_id`, `texto`, `fuente`, `organizacion`, `anio`, `formato`, `fenomeno`, `fenomeno_nombre`, `posicion`, `total_fragmentos` |
+| `GET /api/document/{doc_id}` | `chunk_id` (centro y fragmento marcado `citado`), `posicion` (centro alternativo, def. 0), `ventana` (fragmentos a cada lado, 0–10, def. 2) | cabecera (`formato`, `fuente`, `organizacion`, `anio`, `fenomeno`, `total_fragmentos`), `desde`, `hasta`, `hay_anterior`, `hay_siguiente` y `fragmentos[{chunk_id, posicion, texto, truncado, citado}]` |
+| `GET /api/trace/{trace_id}` | — | `spans` del turno (últimas 50 trazas). **Solo con `ARPIA_DEBUG_TRACE`**; si no, `disponible: false` |
+| `POST /api/view` | cuerpo: un `ViewSpec` | los datos ya resueltos: `filas`, `total`, `cobertura`, `aviso`, `nota`. Valida con el mismo esquema cerrado que el visualizador; una vista temporal agrupa por año |
+
+Cada cifra viene con los `doc_id` que la sustentan, y `/api/evidence` abre el fragmento
+exacto: es la trazabilidad que exige `RETO.md`.
+
+### Referencias: ver de dónde sale cada afirmación (hecho en backend y en el chat)
+
+ADL sugirió que, al pasar el ratón por una referencia, se vea de dónde sale, y que con un clic se
+abra el documento o el fragmento. **Está implementado en el chat y en el tablero.** Tres
+niveles, de menor a mayor costo:
+
+| Pieza | Dónde |
+|---|---|
+| Módulo nuevo: tooltip, visor, paginación | `src/ui/static/js/referencias.js` y `css/referencias.css` |
+| Llamadas de red | `obtenerEvidencia` y `obtenerDocumento` en `js/api.js` |
+| Enganche en el chat | `chat.js`: `enlazarReferencias(cuerpo, citations)` sobre el texto de la respuesta y `hacerCitaInteractiva(item, cita)` en cada tarjeta de "Evidencia"; `chat.html` carga el CSS |
+| Pruebas | `tests/js/referencias.test.mjs` (`node --test`, corre dentro de pytest) |
+
+**Cómo se ve.** Los `doc_id` del texto de la respuesta que tienen cita se vuelven **botones ámbar**
+(`--arpia-evidence`, el color reservado a trazabilidad). Pasar el ratón o enfocarlos con el teclado abre el
+tooltip; clic o Enter abre el visor (panel lateral con el fragmento citado resaltado, sus vecinos y
+"Anteriores" / "Siguientes"). Escape cierra y el foco vuelve a la referencia. Cada tarjeta de evidencia
+trae además su línea de procedencia y un botón "Abrir documento".
+
+Los tres gestos:
+
+| Gesto | Qué mostrar | Fuente de datos | Peticiones |
+|---|---|---|---|
+| **Pasar el ratón** | tooltip: `fuente · anio · formato · fragmento posicion+1 de total_fragmentos` y el texto de `fragmento` | el propio `citations[i]` de la respuesta de `/chat` | **0** |
+| **Clic** | panel con el fragmento completo | `GET /api/evidence/{chunk_id}` | 1 |
+| **"Ver el documento"** dentro del panel | los fragmentos vecinos con el citado resaltado; "anterior" / "siguiente" piden otra `posicion` | `GET /api/document/{doc_id}?chunk_id=…&ventana=2` | 1 por página |
+
+**Por qué fragmentos y no el archivo original.** El corpus guarda **texto ya extraído**, no el archivo:
+`fuente` es una ruta relativa y cada documento tiene un solo archivo. Por formato (índice de la Etapa 1):
+
+| Formato | Documentos | Fragmentos | Abrir el original |
+|---|---|---|---|
+| pdf | 759 | 141.200 | serviría, pero la metadata no trae página |
+| csv / xlsx | 30 | 173.675 | no: las filas (fragmentos) dicen más que descargar el archivo |
+| json (páginas web) | 954 | 6.778 | no: ya es texto |
+| pbf (mosaicos de mapa) | 73 | 5.191 | no: no hay nada legible |
+| jpg / avif / txt | 10 | 22 | solo la imagen; aporta poco |
+
+Como la vista del documento se arma con fragmentos, es **la misma para todos los formatos**, cuesta 0
+tokens y no exige subir los originales al servidor. Abrir el archivo original (solo PDF e imágenes)
+quedó **fuera a propósito**: pediría un endpoint que sirva archivos, que debería resolver por `doc_id` y
+nunca aceptar una ruta.
+
+**Lo que el frontend debe cuidar** (el chat ya lo cumple; el tablero, si reutiliza `referencias.js`, hereda esto)
+- **Pintar el texto como texto, nunca como HTML** (`textContent`, no `innerHTML`). El corpus viene de
+  fuentes externas y puede traer texto malicioso; es parte del puntaje de seguridad.
+- Un fragmento llega a 18.000 tokens: `/api/document` recorta cada uno a 4.000 caracteres y marca
+  `truncado: true`; el texto completo está en `/api/evidence/{chunk_id}`.
+- Los campos nuevos de `citations[]` (`formato`, `posicion`, `total_fragmentos`, `anio`) son
+  **opcionales**: una cifra agregada o el modo stub pueden no traerlos. Ocultar la parte que falte.
+- Todos los endpoints responden 200; un fallo llega como `disponible: false` con `motivo`.
+
+**Mapeo `ViewSpec → endpoint` (implementado en `js/viewspec.js`, función `cargar`).** Los
+parámetros de `/api/aggregate` reflejan los campos del `ViewSpec`:
+
+| `chart` | Endpoint sugerido |
+|---|---|
+| `bar`, `stacked_bar`, `donut`, `table`, `kpi` | `GET /api/aggregate` con `metrica`, `group_by`, `fenomenos`, `desde`, `hasta` |
+| `timeline` | `GET /api/timeline` (o `/api/aggregate` con `group_by=anio`) |
+
+### El tablero, sin datos inventados
+
+`RETO.md` no admite datos simulados en la versión desplegada. El prototipo del tablero dibujaba al abrir
+una serie 2020–2025, marcadores en Bogotá, Cali y Medellín y nodos "País A" y "Empresa B", también en modo
+live. Ahora:
+
+- **Abre con datos reales:** "Documentos por año" (una serie por fenómeno) y "Documentos por fenómeno",
+  desde `/api/aggregate`, con la insignia "Del corpus". Una vista pedida al agente dice "Del agente".
+- **Mapa y relaciones dicen "Sin datos":** el corpus no trae lugar ni actores. El mapa muestra la explicación
+  del propio backend (`/api/geo`); no hay marcadores, teselas externas ni nodos de ejemplo.
+- **Los datos simulados solo existen en modo stub** (`viewspec.datosSimulados`), marcados "Simulado".
+- **Una prueba lo protege:** `tests/test_tablero_sin_datos_inventados.py` falla si vuelve alguno.
+
+**Corrección del contrato.** El tablero esperaba filas `{grupo, fenomeno, valor}` y una cobertura
+`{con_dato, total}`; el backend devuelve `{clave, valor, doc_ids}` y otros nombres, además de no traer el
+fenómeno. Por eso nunca pudo mostrar un dato real. `viewspec.js` (`cargar`) traduce: pide una vez por fenómeno
+(salvo cuando la dimensión es el fenómeno) y cada fila hereda el suyo, y calcula la cobertura solo para el año
+(en las demás dimensiones "100 % tienen año" sería falso). Si el índice no está, muestra un mensaje y no
+inventa nada. Probado con 10 pruebas JS (`tests/js/viewspec.test.mjs`).
+
+**Referencias en el tablero.** Los `doc_id` de la respuesta del asistente son referencias interactivas (tooltip
+y visor, igual que en el chat) y la sección "Fuente" tiene un botón "Abrir documento". Un clic en un
+segmento de la dona o de las barras muestra los documentos que lo sustentan y lo abre en el visor (sin
+fragmento citado: una cifra agregada solo conoce el documento).
+
+### `FRONTEND.md` frente al backend real
+
+Quien construya el tablero debe seguir **esta columna**, no la guía:
+
+| Tema | `FRONTEND.md` dice | El backend real |
+|---|---|---|
+| Ubicación de archivos | `static/` | `src/ui/static/` |
+| Filtro de fenómeno | `?fenomeno=F3` | `?fenomenos=F3` (plural, admite `F1,F2`) |
+| Campos de una cita | `doc_id`, `chunk_id`, `quote`, `score` | `doc_id`, `chunk_id`, **`fuente`**, **`fragmento`** (sin `score`) |
+| Tipos de gráfico | `timeline`, `bar`, `map`, `table` | `timeline`, `bar`, `stacked_bar`, `donut`, `table`, `kpi` — **sin `map`** |
+| Rango de fechas | `"desde": "2024-01-01"` | año de 4 dígitos (`"2024"`), patrón `^\d{4}$` |
+| Agrupación temporal | `group_by: "mes"` | solo `anio`; no hay `mes` ni `trimestre` |
+| Lugar | `"lugar": null` en el `ViewSpec` | el campo **no existe** (`extra="forbid"` lo rechazaría) |
+| Grafo de entidades | `GET /api/graph` | **no existe**: no hay extracción de entidades |
+| Mapas | Leaflet con capas por fenómeno | `/api/geo` responde siempre "no disponible"; no hay dato geográfico |
+
+El frontend **ya lee** los campos correctos en `chat.js`; la discrepancia está en la guía y
+en lo que no se ha construido (mapa y grafo: no hay datos que dibujar).

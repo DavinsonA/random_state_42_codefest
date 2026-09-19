@@ -1,0 +1,660 @@
+/* Tablero (dashboard.html). Diseno del prototipo del index conservado:
+ * panel del asistente a la izquierda y cuadricula 2x2 de graficos a la derecha.
+ *
+ * Mismos radios, sombras y efectos del prototipo; los colores salen de
+ * tokens.css (var(--arpia-*)) y las transparencias de color-mix(). Ningun
+ * color literal aqui.
+ *
+ * Equivalencias con la paleta del prototipo:
+ *   --azul / --azul-profundo -> --arpia-elevated / --arpia-surface
+ *   --azul-claro             -> --arpia-space
+ *   --blanco / --negro       -> --arpia-text / --arpia-void
+ */
+
+.pagina-tablero {
+    --t-borde: color-mix(in srgb, var(--arpia-space) 16%, transparent);
+    --t-borde-hover: color-mix(in srgb, var(--arpia-space) 38%, transparent);
+    --t-texto-suave: var(--arpia-text-secondary);
+    --t-sombra-panel:
+        0 18px 45px color-mix(in srgb, var(--arpia-void) 38%, transparent),
+        0 5px 16px color-mix(in srgb, var(--arpia-void) 22%, transparent);
+    --t-sombra-hover:
+        0 22px 55px color-mix(in srgb, var(--arpia-void) 48%, transparent),
+        0 0 28px color-mix(in srgb, var(--arpia-space) 7%, transparent);
+    --t-radio: 16px;
+
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+
+
+/* =========================
+   CONTENIDO
+   ========================= */
+
+.pagina-tablero .tablero {
+    flex: 1;
+    width: min(1500px, 100%);
+    margin: 0 auto;
+    padding: 24px;
+    display: grid;
+    grid-template-columns: minmax(320px, 0.72fr) minmax(0, 1.28fr);
+    gap: 18px;
+}
+
+/* =========================
+   PANELES
+   ========================= */
+
+.pagina-tablero .ia,
+.pagina-tablero .grafico {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(145deg,
+        color-mix(in srgb, var(--arpia-elevated) 92%, transparent),
+        color-mix(in srgb, var(--arpia-surface) 90%, transparent));
+    border: 1px solid var(--t-borde);
+    border-radius: var(--t-radio);
+    box-shadow: var(--t-sombra-panel);
+    isolation: isolate;
+}
+
+.pagina-tablero .ia::before,
+.pagina-tablero .grafico::before {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+    z-index: -1;
+    width: 180px;
+    height: 180px;
+    top: -110px;
+    right: -80px;
+    border-radius: 50%;
+    background: var(--arpia-space);
+    opacity: 0.045;
+    filter: blur(34px);
+}
+
+.pagina-tablero .ia::after,
+.pagina-tablero .grafico::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+    left: 18px;
+    right: 18px;
+    top: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent,
+        color-mix(in srgb, var(--arpia-text) 18%, transparent),
+        transparent);
+}
+
+/* =========================
+   PANEL IA
+   ========================= */
+
+.pagina-tablero .ia {
+    min-height: 680px;
+    padding: 26px;
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.pagina-tablero .ia:hover {
+    border-color: var(--t-borde-hover);
+    box-shadow: var(--t-sombra-hover);
+}
+
+.pagina-tablero .ia h2 {
+    color: var(--arpia-text);
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+}
+
+.pagina-tablero .estado {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 7px;
+    color: var(--arpia-space);
+    font-size: 12px;
+}
+
+.pagina-tablero .estado[data-estado="degraded"] { color: var(--arpia-warning); }
+.pagina-tablero .estado[data-estado="down"] { color: var(--arpia-critical); }
+
+/* -- respuesta -- */
+
+.pagina-tablero .respuesta {
+    flex: 1;
+    min-height: 300px;
+    max-height: 420px;
+    overflow-y: auto;
+    margin-top: 22px;
+    padding: 20px;
+    background: linear-gradient(180deg,
+        color-mix(in srgb, var(--arpia-void) 38%, transparent),
+        color-mix(in srgb, var(--arpia-void) 58%, transparent));
+    border: 1px solid color-mix(in srgb, var(--arpia-space) 12%, transparent);
+    border-radius: 12px;
+    box-shadow:
+        inset 0 1px 0 color-mix(in srgb, var(--arpia-text) 4.5%, transparent),
+        inset 0 0 35px color-mix(in srgb, var(--arpia-space) 2.5%, transparent);
+}
+
+.pagina-tablero .respuesta h3 {
+    margin-bottom: 14px;
+    color: var(--arpia-space);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.pagina-tablero #respuesta {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    color: color-mix(in srgb, var(--arpia-text) 82%, transparent);
+    font-size: 14px;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+}
+
+.pagina-tablero .respuesta-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 8px;
+    border-top: 1px solid color-mix(in srgb, var(--arpia-space) 12%, transparent);
+    color: var(--t-texto-suave);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.pagina-tablero .respuesta-meta .chip-agente {
+    list-style: none;
+}
+
+.pagina-tablero .pensando {
+    display: none;
+    margin-top: 18px;
+    color: var(--arpia-space);
+    font-size: 12px;
+}
+
+.pagina-tablero .pensando.activo {
+    display: block;
+    animation: latido 1.4s ease-in-out infinite;
+}
+
+/* -- pregunta -- */
+
+.pagina-tablero .pregunta {
+    display: flex;
+    gap: 7px;
+    margin-top: 14px;
+    padding: 5px;
+    background: color-mix(in srgb, var(--arpia-void) 42%, transparent);
+    border: 1px solid color-mix(in srgb, var(--arpia-space) 15%, transparent);
+    border-radius: 11px;
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--arpia-text) 3.5%, transparent);
+    transition: 0.25s ease;
+}
+
+.pagina-tablero .pregunta:focus-within {
+    border-color: color-mix(in srgb, var(--arpia-space) 48%, transparent);
+    box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--arpia-space) 4.5%, transparent),
+        0 8px 24px color-mix(in srgb, var(--arpia-void) 24%, transparent);
+}
+
+.pagina-tablero .pregunta input {
+    flex: 1;
+    min-width: 0;
+    padding: 11px 12px;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    color: var(--arpia-text);
+    font: inherit;
+    font-size: 13px;
+}
+
+.pagina-tablero .pregunta input::placeholder {
+    color: color-mix(in srgb, var(--arpia-text) 38%, transparent);
+}
+
+.pagina-tablero .pregunta button {
+    padding: 0 18px;
+    background: var(--arpia-space);
+    border: 1px solid color-mix(in srgb, var(--arpia-text) 18%, transparent);
+    border-radius: 8px;
+    color: var(--arpia-bg);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 0.2s ease;
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--arpia-space) 10%, transparent);
+}
+
+.pagina-tablero .pregunta button:hover:not(:disabled) {
+    background: var(--arpia-text);
+    transform: translateY(-1px);
+}
+
+.pagina-tablero .pregunta button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+/* -- fuente: trazabilidad a doc_id / chunk_id -- */
+
+.pagina-tablero .fuente {
+    margin-top: 14px;
+    padding: 14px 16px;
+    background: color-mix(in srgb, var(--arpia-void) 25%, transparent);
+    border: 1px solid color-mix(in srgb, var(--arpia-space) 10%, transparent);
+    border-left: 2px solid var(--arpia-evidence);
+    border-radius: 11px;
+    font-size: 11px;
+}
+
+.pagina-tablero .fuente h3 {
+    margin-bottom: 7px;
+    color: var(--arpia-text);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.pagina-tablero .fuente p {
+    color: var(--t-texto-suave);
+    overflow-wrap: anywhere;
+}
+
+.pagina-tablero .fuente span {
+    color: var(--arpia-evidence);
+    font-family: var(--fuente-mono);
+    font-variant-ligatures: none;  /* un doc_id/chunk_id se muestra glifo a glifo */
+}
+
+/* =========================
+   GRAFICOS
+   ========================= */
+
+.pagina-tablero .graficos {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: start;
+    gap: 18px;
+}
+
+.pagina-tablero .grafico {
+    min-width: 0;
+    padding: 17px;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.pagina-tablero .grafico:hover {
+    transform: translateY(-3px);
+    border-color: var(--t-borde-hover);
+    box-shadow: var(--t-sombra-hover);
+}
+
+/* panel que acaba de actualizar el agente */
+.pagina-tablero .grafico.activo {
+    border-color: var(--t-borde-hover);
+}
+
+.grafico-cabeza {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.pagina-tablero .grafico h3 {
+    color: var(--arpia-text);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+.insignia-panel {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+
+.insignia-panel[data-origen="cargando"],
+.insignia-panel[data-origen="sin_datos"] { color: var(--arpia-text-muted); }
+.insignia-panel[data-origen="simulado"] { color: var(--arpia-warning); }
+.insignia-panel[data-origen="corpus"] { color: var(--arpia-info); }
+.insignia-panel[data-origen="agente"] { color: var(--arpia-success); }
+
+/* panel sin datos: el corpus no trae lugar ni actores; se dice, no se dibuja */
+.pagina-tablero .vacio {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    min-height: 140px;
+    padding: 12px;
+    color: var(--t-texto-suave);
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.pagina-tablero .fuente .boton {
+    margin-top: 8px;
+}
+
+.grafico-nota {
+    min-height: 0;
+    margin-bottom: 6px;
+    color: var(--t-texto-suave);
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.grafico-nota:empty {
+    display: none;
+}
+
+/* altura fija como en el prototipo: Chart.js responsive necesita un contenedor
+   que no crezca con el propio canvas */
+.pagina-tablero .lienzo {
+    position: relative;
+    height: 250px;
+}
+
+/* -- mapa -- */
+
+.pagina-tablero #mapa {
+    height: 250px;
+    border-radius: 10px;
+    overflow: hidden;
+    filter: saturate(0.72) contrast(1.04);
+    box-shadow:
+        inset 0 0 25px color-mix(in srgb, var(--arpia-void) 30%, transparent),
+        0 8px 18px color-mix(in srgb, var(--arpia-void) 18%, transparent);
+}
+
+/* -- relaciones -- */
+
+.pagina-tablero .relaciones {
+    position: relative;
+    flex: 1;
+    min-height: 200px;
+}
+
+.pagina-tablero .nodo {
+    position: absolute;
+    padding: 9px 14px;
+    background: var(--arpia-space);
+    border: 1px solid color-mix(in srgb, var(--arpia-text) 28%, transparent);
+    border-radius: 999px;
+    color: var(--arpia-bg);
+    font-size: 12px;
+    font-weight: 700;
+    box-shadow:
+        0 8px 20px color-mix(in srgb, var(--arpia-void) 35%, transparent),
+        0 0 18px color-mix(in srgb, var(--arpia-space) 8%, transparent);
+    transition: 0.2s ease;
+}
+
+.pagina-tablero .nodo:hover {
+    background: var(--arpia-text);
+    transform: translateY(-2px);
+}
+
+.pagina-tablero .centro {
+    left: 50%;
+    top: 45%;
+    transform: translate(-50%, -50%);
+}
+
+.pagina-tablero .centro:hover {
+    transform: translate(-50%, calc(-50% - 2px));
+}
+
+.pagina-tablero .arriba {
+    left: 8%;
+    top: 12%;
+}
+
+.pagina-tablero .abajo {
+    right: 8%;
+    bottom: 12%;
+}
+
+.pagina-tablero .relaciones::before,
+.pagina-tablero .relaciones::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    height: 1px;
+    width: 34%;
+    background: linear-gradient(90deg,
+        transparent,
+        color-mix(in srgb, var(--arpia-space) 28%, transparent),
+        transparent);
+}
+
+.pagina-tablero .relaciones::before {
+    left: 24%;
+    top: 34%;
+    transform: rotate(16deg);
+}
+
+.pagina-tablero .relaciones::after {
+    right: 24%;
+    bottom: 34%;
+    transform: rotate(-16deg);
+}
+
+/* =========================
+   RESPONSIVE
+   ========================= */
+
+@media (max-width: 1050px) {
+    .pagina-tablero .tablero {
+        grid-template-columns: 1fr;
+    }
+
+    .pagina-tablero .ia {
+        min-height: 560px;
+    }
+}
+
+@media (max-width: 700px) {
+    .pagina-tablero .tablero {
+        padding: 14px;
+        gap: 14px;
+    }
+
+    .pagina-tablero .ia {
+        padding: 20px;
+    }
+
+    .pagina-tablero .graficos {
+        grid-template-columns: 1fr;
+    }
+
+    .pagina-tablero .pregunta button {
+        padding: 0 14px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pagina-tablero .pensando.activo { animation: none; }
+    .pagina-tablero .grafico:hover,
+    .pagina-tablero .nodo:hover { transform: none; }
+}
+
+
+/* =========================
+   PANTALLA COMPLETA DE PANELES
+   ========================= */
+
+.pagina-tablero .grafico {
+    position: relative;
+}
+
+.boton-pantalla-completa {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 20;
+
+    width: 32px;
+    height: 32px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 0;
+
+    background: rgba(8, 14, 28, 0.85);
+    border: 1px solid var(--arpia-border);
+    border-radius: 7px;
+
+    color: var(--arpia-text);
+    font-size: 18px;
+    cursor: pointer;
+
+    transition: 0.2s ease;
+}
+
+.boton-pantalla-completa:hover {
+    background: var(--arpia-space);
+    border-color: var(--arpia-text);
+}
+
+.pagina-tablero .grafico:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    padding: 24px;
+
+    border-radius: 0;
+    background: var(--arpia-void);
+
+    display: flex;
+    flex-direction: column;
+}
+
+.pagina-tablero .grafico:fullscreen canvas {
+    flex: 1;
+    min-height: 0;
+}
+
+.pagina-tablero .grafico:fullscreen #mapa {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+}
+
+.pagina-tablero .grafico:fullscreen .relaciones {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+}
+
+/* =========================
+   BOTÓN PANTALLA COMPLETA
+   ========================= */
+
+.pagina-tablero .grafico {
+    position: relative;
+}
+
+.boton-fullscreen {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 100;
+
+    width: 32px;
+    height: 32px;
+
+    padding: 0;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border: 1px solid var(--t-borde);
+    border-radius: 7px;
+
+    background: rgba(5, 10, 20, 0.85);
+    color: var(--arpia-text);
+
+    font-size: 18px;
+    cursor: pointer;
+}
+
+.boton-fullscreen:hover {
+    background: var(--arpia-space);
+    color: var(--arpia-bg);
+}
+
+/* CUADRO EN PANTALLA COMPLETA */
+
+.pagina-tablero .grafico.en-pantalla-completa {
+    position: fixed !important;
+    inset: 0 !important;
+
+    width: 100vw !important;
+    height: 100vh !important;
+
+    margin: 0 !important;
+    padding: 25px !important;
+
+    z-index: 99999 !important;
+
+    border-radius: 0 !important;
+
+    background: var(--arpia-void) !important;
+
+    transform: none !important;
+}
+
+/* El gráfico ocupa todo el espacio disponible */
+
+.pagina-tablero .grafico.en-pantalla-completa .lienzo {
+    height: calc(100vh - 130px) !important;
+}
+
+.pagina-tablero .grafico.en-pantalla-completa #mapa {
+    height: calc(100vh - 130px) !important;
+}
+
+.pagina-tablero .grafico.en-pantalla-completa .relaciones {
+    height: calc(100vh - 130px) !important;
+}
+
+/* canvas de Chart.js */
+
+.pagina-tablero .grafico.en-pantalla-completa canvas {
+    width: 100% !important;
+    height: 100% !important;
+}

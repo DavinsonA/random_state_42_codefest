@@ -10,6 +10,10 @@ __pycache__/
 .ropeproject
 tests/
 lab/
+# La bateria de inyeccion es herramienta de desarrollo: vive en el repo
+# (es la evidencia del bloque de seguridad) y no tiene nada que hacer dentro
+# de la imagen desplegada.
+scripts/
 
 # OJO: `docs/` NO se excluye. `src/theme/tokens.py` lee
 # `docs/design/design-tokens.json` en tiempo de ejecucion (AGENTS.md §2):

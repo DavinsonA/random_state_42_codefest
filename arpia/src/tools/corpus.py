@@ -25,6 +25,29 @@ SOBRE_RECUPERAR = 40
 
 _index: VectorIndex | None = None
 
+#: Largo del texto citado que viaja en la respuesta. El fragmento completo se
+#: abre con `/api/evidence/{chunk_id}`.
+FRAGMENTO_CHARS = 240
+
+
+def _cita(doc_id: str, chunk_id: str, fila: dict, texto: str) -> dict:
+    """Una cita con todo lo que el tooltip de una referencia necesita.
+
+    Unico punto donde se arma: `recuperar`, `citar_documentos` y el respaldo de
+    `/chat` la usan, para que una cita salga igual venga de donde venga. Los
+    campos que la fila no tiene salen como None y el contrato los admite.
+    """
+    return {
+        "doc_id": doc_id,
+        "chunk_id": chunk_id,
+        "fuente": fila.get("organizacion") or fila.get("fuente"),
+        "fragmento": texto[:FRAGMENTO_CHARS],
+        "formato": fila.get("formato"),
+        "posicion": fila.get("posicion"),
+        "total_fragmentos": fila.get("total_fragmentos"),
+        "anio": fila.get("anio"),
+    }
+
 
 def _get_index() -> VectorIndex:
     global _index
@@ -33,7 +56,9 @@ def _get_index() -> VectorIndex:
     return _index
 
 
-def recuperar(query: str, k: int = 8, fenomeno: str | None = None) -> list[Hit]:
+def recuperar(
+    query: str, k: int = 8, fenomeno: str | None = None, *, registrar_tool: bool = True
+) -> list[Hit]:
     """Recupera fragmentos y DEJA CONSTANCIA en el registro del turno.
 
     Punto unico de recuperacion del sistema. Todo lo que busque en el corpus
@@ -48,6 +73,9 @@ def recuperar(query: str, k: int = 8, fenomeno: str | None = None) -> list[Hit]:
         query: consulta en lenguaje natural, usada literal.
         k: fragmentos a devolver despues de filtrar.
         fenomeno: "F1" | "F2" | "F3" para sesgar el resultado, o None.
+        registrar_tool: anota la busqueda en `tools_called`. La tool registrada
+            `buscar_corpus` pasa False porque el registry ya la anota, y dos
+            entradas por una sola busqueda falsearian la trayectoria.
 
     Returns:
         Lista de `Hit` ordenada por similitud descendente.
@@ -64,21 +92,64 @@ def recuperar(query: str, k: int = 8, fenomeno: str | None = None) -> list[Hit]:
         hits = filtrados or hits
     hits = hits[:k]
 
+    # ADL evalua la trayectoria a partir de `tools_called`. Una recuperacion que
+    # no deja rastro ahi se lee como una respuesta salida de la nada.
+    if registrar_tool:
+        turnlog.record_tool_call(
+            "buscar_corpus",
+            {"query": query, "k": k, "fenomeno": fenomeno or ""},
+            f"{len(hits)} fragmentos recuperados"
+            + (f" (mejor score {hits[0].score:.3f})" if hits else ""),
+        )
+
     # Lo que ADL llama `retrieval_context`: el texto que se le entrego al modelo,
     # con su procedencia para que las citas tengan respaldo.
     turnlog.add_context([f"({h.citation()}) {h.text}" for h in hits])
-    turnlog.add_citations(
-        [
-            {
-                "doc_id": h.doc_id,
-                "chunk_id": h.chunk_id,
-                "fuente": h.metadata.get("organizacion") or h.metadata.get("fuente"),
-                "fragmento": h.text[:240],
-            }
-            for h in hits
-        ]
-    )
+    turnlog.add_citations([_cita(h.doc_id, h.chunk_id, h.metadata, h.text) for h in hits])
     return hits
+
+
+def citar_documentos(doc_ids: list[str]) -> list[dict]:
+    """Deja constancia de documentos concretos del corpus como citas del turno.
+
+    Es el equivalente de `recuperar` para las cifras: un conteo por
+    organizacion no recupera fragmentos, pero cada cifra descansa sobre
+    documentos reales. `RETO.md` exige que todo dato mostrado se rastree a su
+    `doc_id` y `chunk_id`; sin esto, una respuesta cuantitativa salia con
+    `citations` vacio aunque el sistema conocia los documentos detras de cada
+    numero.
+
+    Para cada documento registra su PRIMER fragmento, con su texto real: es la
+    evidencia textual que un experto puede abrir (`GET /api/evidence/{chunk_id}`).
+
+    **No fuerza la carga del indice.** Un indice sin cargar son 1,3 GB y varios
+    segundos; en produccion ya esta cargado, porque la tabla de agregados sale de
+    el. Si no lo esta, o si falla, devuelve `[]`: una cita que no se pudo obtener
+    no debe tumbar un conteo exacto.
+
+    Args:
+        doc_ids: identificadores de documento (`F2-CSIS-014`).
+
+    Returns:
+        Las citas registradas, en el orden pedido. Vacia si no fue posible.
+    """
+    if not doc_ids:
+        return []
+    try:
+        indice = _get_index()
+        if not indice.stats():
+            return []
+        filas = indice.documents_meta(doc_ids)
+    except Exception:  # noqa: BLE001 - una cita ausente no debe tumbar el conteo
+        return []
+
+    citas = [
+        _cita(d, filas[d]["chunk_id"], filas[d], str(filas[d].get("texto", "")))
+        for d in doc_ids
+        if d in filas and filas[d].get("chunk_id")
+    ]
+    turnlog.add_citations(citas)
+    return citas
 
 
 @registry.register(span_type="retrieval")
@@ -110,7 +181,7 @@ def buscar_corpus(query: str, k: int = 8, fenomeno: str = "") -> str:
         documento para poder citarlo. Si no hay resultados, lo indica
         explicitamente en vez de devolver texto vacio.
     """
-    hits = recuperar(query, k=k, fenomeno=fenomeno or None)
+    hits = recuperar(query, k=k, fenomeno=fenomeno or None, registrar_tool=False)
     if not hits:
         return f"Sin resultados para la consulta: {query!r}"
     return "\n\n".join(
