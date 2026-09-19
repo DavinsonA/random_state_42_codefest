@@ -335,6 +335,15 @@ function agrupar(filas, clave) {
     return [...m.values()];
 }
 
+/** Parte una etiqueta larga en lineas de hasta `ancho` letras (Chart.js dibuja cada elemento en su linea). */
+const envolver = (texto, ancho = 18) =>
+    String(texto).split(" ").reduce((lineas, palabra) => {
+        const ultima = lineas[lineas.length - 1];
+        if (ultima !== undefined && `${ultima} ${palabra}`.length <= ancho) lineas[lineas.length - 1] = `${ultima} ${palabra}`;
+        else lineas.push(palabra);
+        return lineas;
+    }, []);
+
 const legible = (g) => String(g ?? "").replace(/_/g, " ") || t("tablero.sinDato");
 
 /** Elige y prepara el renderizador para el tipo de grafico que pidio el agente. */
@@ -417,8 +426,10 @@ function dibujanteDe(spec, filas, total) {
                 });
             }
             // Por otra dimension: una serie por fenomeno; apiladas si lo pidio el agente.
+            // Por fenomeno van en su orden (F1, F2, F3); en las demas, de mayor a menor.
+            const porFen = spec.group_by === "fenomeno";
             const categorias = agrupar(filas, (f) => f.grupo)
-                .sort((a, b) => b.valor - a.valor)
+                .sort((a, b) => (porFen ? a.k.localeCompare(b.k) : b.valor - a.valor))
                 .slice(0, MAX_CATEGORIAS)
                 .map((g) => g.k);
             const series = fens.map((fen) => {
@@ -432,11 +443,12 @@ function dibujanteDe(spec, filas, total) {
             });
             return (c) => dibujarBarras(c, {
                 etiqueta,
-                labels: categorias.map(legible),
+                labels: categorias.map((k) => (porFen ? envolver(etiquetaFenomeno(k)) : legible(k))),
                 series,
                 apilado: spec.chart === "stacked_bar",
-                // etiquetas largas (organizaciones, fuentes) se leen mejor en horizontal
-                horizontal: spec.group_by !== "anio",
+                // etiquetas largas (organizaciones, fuentes) se leen mejor en horizontal; las de los
+                // tres fenomenos, en columnas con el nombre partido en lineas
+                horizontal: spec.group_by !== "anio" && !porFen,
             });
         }
     }
@@ -451,7 +463,10 @@ async function vistaDelAgente(spec, { inicial = false } = {}) {
         return { titulo, origen: "sin_datos", nota: `${NOMBRE_CHART[spec.chart]}. ${error}`, dibujar: mensaje(t("tablero.sinDatosTodavia")) };
     }
 
-    const notas = [spec.nota, datos.nota];
+    // El aviso generico ("solo el 34 % declara ano") lo reemplaza la cobertura MEDIDA de esta vista:
+    // decir las dos cosas seguidas confunde (34 % del corpus y 10 % de F1 a la vez).
+    const generico = datos.cobertura?.total && /^Cobertura temporal/i.test(spec.nota || "");
+    const notas = [generico ? "" : spec.nota, datos.nota];
     if (datos.cobertura?.total) {
         const { con_dato, total } = datos.cobertura;
         notas.push(t("nota.cobertura", { con: fmt.format(con_dato), total: fmt.format(total), pct: Math.round((con_dato / total) * 100) }));

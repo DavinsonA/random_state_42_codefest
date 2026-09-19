@@ -399,4 +399,45 @@ def test_el_tope_de_la_pregunta_llega_a_la_vista_que_emitio_el_visualizador(live
 
 def test_sin_tope_en_la_pregunta_la_vista_no_se_recorta(live):
     client, _ = live(GrafoConVista())
-    assert _chat(client, "las organizaciones que mas publican").json()["view_spec"]["limite"] is None
+    assert (
+        _chat(client, "las organizaciones que mas publican").json()["view_spec"]["limite"] is None
+    )
+
+
+class GrafoQueSePierdeLaDimension(FakeGraph):
+    """Como el caso real: el analista cuenta por organizacion de F2, pero el visualizador solo
+    recibio "muestra un grafico de barras" y emite su valor por defecto (por fenomeno)."""
+
+    def invoke(self, state, config=None):
+        from src.observability import turnlog
+
+        turnlog.record_tool_call(
+            "consultar_agregado",
+            {"metrica": "conteo_documentos", "group_by": "organizacion", "fenomenos": "F2"},
+            "{}",
+        )
+        resultado = super().invoke(state, config)
+        resultado["view_spec"] = {
+            "chart": "bar",
+            "group_by": "fenomeno",
+            "fenomenos": ["F1", "F2", "F3"],
+            "titulo": "Top 3 organizations by document count",
+        }
+        return resultado
+
+
+def test_la_vista_del_visualizador_coincide_con_lo_que_conto_el_analista(live):
+    client, _ = live(GrafoQueSePierdeLaDimension())
+    v = _chat(
+        client, "Las 3 organizaciones que mas publican sobre seguridad espacial en barras"
+    ).json()["view_spec"]
+    assert (v["group_by"], v["fenomenos"], v["limite"]) == ("organizacion", ["F2"], 3)
+    assert v["titulo"] == "Documentos por organización · F2", (
+        "en espanol, aunque el modelo titulara en ingles"
+    )
+
+
+def test_una_pregunta_en_ingles_conserva_el_titulo_que_dio_el_modelo(live):
+    client, _ = live(GrafoQueSePierdeLaDimension())
+    v = _chat(client, "Show the top organizations by documents in a bar chart").json()["view_spec"]
+    assert v["group_by"] == "organizacion"

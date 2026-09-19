@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { VISTA_INICIAL, VISTA_TIEMPO_INICIAL, cargar, mensajeIndice, normalizar } from "../../src/ui/static/js/viewspec.js";
+import { VISTA_INICIAL, VISTA_TIEMPO_INICIAL, cargar, mensajeIndice, normalizar, tituloPorDefecto } from "../../src/ui/static/js/viewspec.js";
 
 /** Instala un fetch falso. `responder(spec)` devuelve el cuerpo que daria `POST /api/view`. */
 function simularBackend(responder) {
@@ -260,4 +260,16 @@ test("normalizar conserva el tope de categorias solo si es valido", () => {
     assert.equal(normalizar({ chart: "table", group_by: "organizacion", limite: 5 }).limite, 5);
     assert.equal(normalizar({ chart: "table", group_by: "organizacion", limite: 500 }).limite, null);
     assert.equal(normalizar({ chart: "table", group_by: "organizacion" }).limite, null);
+});
+
+// El panel con el que abre el tablero: de que tipo es el material de cada fenomeno.
+test("la vista inicial cruza fenomeno y formato, y normalizar no la desarma", () => {
+    const v = normalizar(VISTA_INICIAL);
+    assert.deepEqual([v.chart, v.group_by, v.serie_por], ["stacked_bar", "fenomeno", "formato"]);
+    assert.equal(tituloPorDefecto(v), "Documentos por fenómeno y formato");
+});
+
+test("una barra apilada por fenomeno ya no se reescribe a organizacion", () => {
+    assert.equal(normalizar({ chart: "stacked_bar", group_by: "fenomeno" }).group_by, "fenomeno");
+    assert.equal(normalizar({ chart: "stacked_bar" }).group_by, "organizacion");
 });

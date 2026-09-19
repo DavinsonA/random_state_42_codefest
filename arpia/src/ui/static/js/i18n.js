@@ -62,6 +62,7 @@ const DICC = {
 
         "titulo.total": "Total de {metrica}",
         "titulo.por": "{Metrica} por {grupo}",
+        "titulo.cruce": "{Metrica} por {grupo} y {serie}",
 
         "error.sin_backend": "Esta página no está conectada al backend de A.R.P.I.A. (se abrió desde otro servidor, p. ej. Live Server). Con el backend encendido, ábrela en http://localhost:8765/ (chat) o http://dashboard.localhost:8765/ (tablero).",
         "error.timeout": "El servicio tardó demasiado en responder. Intenta de nuevo.",
@@ -224,6 +225,7 @@ const DICC = {
 
         "titulo.total": "Total {metrica}",
         "titulo.por": "{Metrica} by {grupo}",
+        "titulo.cruce": "{Metrica} by {grupo} and {serie}",
 
         "error.sin_backend": "This page is not connected to the A.R.P.I.A. backend (it was opened from another server, e.g. Live Server). With the backend running, open it at http://localhost:8765/ (chat) or http://dashboard.localhost:8765/ (dashboard).",
         "error.timeout": "The service took too long to respond. Please try again.",
