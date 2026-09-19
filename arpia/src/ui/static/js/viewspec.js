@@ -123,24 +123,94 @@ function datosSimulados(spec) {
     };
 }
 
+/** Vista con la que abre el panel de evolucion temporal. */
+export const VISTA_TIEMPO_INICIAL = {
+    chart: "timeline",
+    metrica: "conteo_documentos",
+    fenomenos: [],
+    desde: null,
+    hasta: null,
+    group_by: "anio",
+    titulo: "Documentos por año",
+    nota: "",
+};
+
+/** Traduce los motivos de `disponible: false` a un mensaje para el analista. */
+export function mensajeIndice(motivo) {
+    const m = String(motivo || "");
+    if (m.startsWith("indice no disponible")) {
+        return "El índice del corpus todavía no está disponible. La vista se mostrará en cuanto lo esté.";
+    }
+    return m ? `No hay datos disponibles: ${m}.` : "No se pudieron cargar los datos de la vista.";
+}
+
+/** Une las coberturas de varias peticiones (una por fenomeno) en una sola.
+ *
+ * `con_dato` son los documentos que SI declaran la dimension y `total` los que
+ * la podian declarar. Solo tiene sentido para el ano: en las demas dimensiones
+ * todos los documentos tienen dato y mostrar "100 % tienen año" seria falso.
+ */
+function unirCobertura(respuestas, dimension) {
+    if (dimension !== "anio") return null;
+    let total = 0;
+    let conDato = 0;
+    for (const r of respuestas) {
+        const c = r.cobertura;
+        if (!c) continue;
+        total += Number(c.documentos_en_dimension) || 0;
+        conDato += (Number(c.documentos_en_dimension) || 0) - (Number(c.sin_dato_en_la_dimension) || 0);
+    }
+    return total ? { con_dato: conDato, total } : null;
+}
+
 /**
  * Carga los datos de una vista.
  * Devuelve { datos } o { error } con un mensaje legible; nunca lanza.
+ *
+ * El backend responde `{ clave, valor, doc_ids }` sin fenomeno. Los graficos
+ * apilan y colorean por fenomeno, asi que, salvo cuando la dimension ES el
+ * fenomeno, se pide una vez por fenomeno y cada fila lo hereda de su peticion.
  */
 export async function cargar(spec, { modoStub = false } = {}) {
     try {
-        const r = await obtenerAgregado(spec);
-        const filas = (r.filas || []).map((f) => ({
-            grupo: f.grupo === null || f.grupo === undefined ? "" : String(f.grupo),
-            fenomeno: FENS.includes(f.fenomeno) ? f.fenomeno : null,
-            valor: Number(f.valor) || 0,
-            doc_ids: Array.isArray(f.doc_ids) ? f.doc_ids.map(String) : [],
-        }));
-        return { datos: { filas, total: r.total, cobertura: r.cobertura || null, nota: r.nota || "", simulado: r.mode === "stub" } };
+        const dimension = spec.group_by || "fenomeno";
+        const fenomenos = spec.fenomenos.length ? spec.fenomenos : FENS;
+        const peticiones =
+            dimension === "fenomeno"
+                ? [obtenerAgregado({ ...spec, group_by: "fenomeno" })]
+                : fenomenos.map((f) => obtenerAgregado({ ...spec, group_by: dimension, fenomenos: [f] }));
+
+        const respuestas = await Promise.all(peticiones);
+        const caida = respuestas.find((r) => r.disponible === false);
+        if (caida) {
+            if (modoStub) return { datos: datosSimulados(spec) };
+            return { error: mensajeIndice(caida.motivo) };
+        }
+
+        const filas = respuestas.flatMap((r, i) =>
+            (r.filas || []).map((f) => {
+                const clave = f.clave === null || f.clave === undefined ? "" : String(f.clave);
+                return {
+                    grupo: clave,
+                    fenomeno: dimension === "fenomeno" ? (FENS.includes(clave) ? clave : null) : fenomenos[i],
+                    valor: Number(f.valor) || 0,
+                    doc_ids: Array.isArray(f.doc_ids) ? f.doc_ids.map(String) : [],
+                };
+            }),
+        );
+        return {
+            datos: {
+                filas,
+                total: filas.reduce((s, f) => s + f.valor, 0),
+                cobertura: unirCobertura(respuestas, dimension),
+                nota: "",
+                simulado: false,
+            },
+        };
     } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
             if (modoStub) return { datos: datosSimulados(spec) };
-            return { error: "El servicio aún no expone los datos del tablero (/api/aggregate). La vista se mostrará en cuanto esté disponible." };
+            return { error: "El servicio no expone los datos del tablero (/api/aggregate)." };
         }
         return { error: err.message || "No se pudieron cargar los datos de la vista." };
     }

@@ -343,7 +343,9 @@ export function abrirVisor(cita, origen) {
     ocultarTooltip(true);
     disparador = origen || null;
     estado.docId = cita.doc_id;
-    estado.citado = cita.chunk_id;
+    // Una cifra agregada solo conoce el documento: sin fragmento citado, el visor
+    // abre el documento desde el principio.
+    estado.citado = cita.chunk_id || "";
     estado.cita = cita;
     estado.documento = null;
 

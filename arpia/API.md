@@ -33,16 +33,14 @@
 | `GET /api/graph` (lo cita `FRONTEND.md`) | ❌ no existe | — |
 | `GET /topics` | ➖ **retirado**: se eliminó el contrato sin ruta ni consumidor (`adea37f`) | — |
 | Chat web (`chat.html`), sin CDN | ✅ hecho | `src/ui/static/` |
-| Tablero web (`dashboard.html`) y librerías vendorizadas (Plotly, Leaflet) | ❌ **no existen**: `dashboard.*` muestra un aviso (§14) | `src/ui/static/` |
+| Tablero web (`dashboard.html`, Chart.js vendorizado) | ✅ hecho: abre con datos reales del corpus y sin datos de ejemplo (§14) | `src/ui/static/` |
 
-**Lo más importante que hay que saber:** el backend está construido y sus 319 pruebas
+**Lo más importante que hay que saber:** el backend está construido y sus 390 pruebas
 pasan; **casi todas usan modelos falsos**, y con el modelo real solo hay pruebas manuales
 (§11). Esas pruebas manuales, hechas el 19 de septiembre con el índice de la Etapa 1, el
 encoder `bge-m3` y LiteLLM, **funcionan de punta a punta** (pregunta documental, cuantitativa
 y de vista) y confirmaron los arreglos de §12 #1 y #2. Encontraron además dos fallos nuevos
-que ninguna prueba con modelo falso podía ver (§12 #22 y #23). **El tablero web aún no
-existe**: hay endpoints de datos (`/api/*`) pero no `dashboard.html`, así que el dominio
-`dashboard.*` hoy muestra un aviso (§14).
+que ninguna prueba con modelo falso podía ver (§12 #22 y #23). **El tablero web ya existe** y abre con datos reales (§14).
 
 ---
 
@@ -532,8 +530,7 @@ credenciales nunca van en el código ni en la imagen.
 - **Un solo contenedor, tres dominios.** `agent.*`, `frontagent.*` y `dashboard.*` apuntan
   al mismo servicio; `routing.py` decide qué HTML servir en `/` según el `Host`
   (`dashboard.*` → `dashboard.html`; cualquier otro → `chat.html`). Los archivos viven en
-  `src/ui/static/` y entran a la imagen con `COPY . .`. **`dashboard.html` no existe todavía**:
-  hasta que exista, `dashboard.*` responde 200 con un aviso.
+  `src/ui/static/` y entran a la imagen con `COPY . .`. `dashboard.html` existe (rama `JuanE`, ya integrada en `main`); si faltara en la imagen, `dashboard.*` respondería 200 con un aviso.
 - **Coolify:** build pack `Dockerfile`, Base Directory `/arpia`, puerto `8000`, `www
   redirect` en *No redirect*. El `Dockerfile` hace `COPY . .` y **la frontera de qué entra
   la define `.dockerignore`**.
@@ -588,7 +585,8 @@ uv run pytest tests -q                                      # 319 casos
 | `test_voz.py` | la voz del sistema vive en un solo módulo; ningún prompt define su propio tono | 15 |
 | `test_trazabilidad_analitico.py` | cada cifra cita sus documentos; `citations` y `retrieval_context` llenos; el verificador no reescribe un conteo trazable; el conteo no se cae si el índice falla | 12 |
 | `test_theme.py` | ningún color hexadecimal fuera de `src/theme/` | 6 |
-| `test_frontend_referencias.py` + `tests/js/` | la lógica pura del tooltip y del visor (partir el texto por `doc_id`, describir una cita, paginar), con `node --test`; se omite si no hay Node | 1 (12 en JS) |
+| `test_frontend_referencias.py` + `tests/js/` | la lógica pura del tooltip y del visor (partir el texto por `doc_id`, describir una cita, paginar), con `node --test`; se omite si no hay Node | 1 (22 en JS: referencias y traducción de `/api/aggregate`) |
+| `test_tablero_sin_datos_inventados.py` | el tablero no trae series, marcadores ni nodos de ejemplo ni depende de un mapa externo, y abre con las vistas del corpus | 4 |
 | `test_referencias.py` | citas con `formato`/`posicion`/`total_fragmentos`; lectura por posición sobre un `VectorIndex` real pequeño; `/api/document` (ventana, bordes, tope, fragmento ajeno, doc desconocido, recorte); ids hostiles o truncados no abren otro fragmento | 28 |
 
 > Las pruebas de `test_graph.py` cuentan llamadas con **contadores del LLM falso**; no leen
@@ -640,14 +638,14 @@ orquestador, el caché y la memoria con su evidencia, su propuesta de arreglo y 
 | 10 | ✅ **HECHO en la Fase 5.** `GET /api/evidence/{chunk_id}` | Trazabilidad del tablero (`RETO.md`) | Existe (`dashboard.py`); falta que el chat lo use al hacer clic en una cita (#20) |
 | 11 | ✅ **HECHO en la Fase 5.** Endpoint de datos del tablero | Los datos de un `ViewSpec` salen de `GET /api/aggregate` y `/api/timeline`, con `doc_id` y cobertura | Existe; falta el mapeo `ViewSpec → endpoint` en el frontend (§14) |
 | 12 | **Documento de arquitectura y propuesta de diseño por fenómeno**, dentro del repo y fuera de `docs/` | Entregable: vale el Bloque D (20%) y el 40% del Reto 2. `docs/architecture.md` está obsoleto | Redactarlo con la justificación de cada decisión de §13 |
-| 13 | `chat.html` ✅ hecho; **`dashboard.html` y `vendor/` (Plotly, Leaflet) ❌ no existen** | El dominio `dashboard.*` muestra un aviso: sin él no hay Reto 2 desplegable (55% ejecución dinámica) | Lo mantiene el frontend; faltan además `viewspec.js` y `charts.js` |
+| 13 | ✅ **Resuelto.** `chat.html` y `dashboard.html` existen (Chart.js vendorizado) y el tablero abre con datos reales | — | — |
 | 14 | Umbral de evidencia `0,50` sin recalibrar | El propio código lo marca; si salta siempre, gasta una llamada extra por turno | Recalibrar con consultas reales (Fase 5) |
 | 15 | Batería de prompt injection end-to-end contra el endpoint | Es el 15% del total del Reto 1 | Script con ataques propios sobre el endpoint desplegado |
 | 16 | ✅ **HECHO en `adea37f`.** El verificador está declarado en `agent_card.json` | ADL cruza los ids de `agentes_invocados` y `tokens_por_agente` contra la ficha | — |
 | 17 | ✅ **HECHO en `adea37f`.** La tabla del corpus no se cachea vacía | Antes, si el volumen del índice no estaba al llegar la primera petición, el tablero quedaba en blanco hasta reiniciar | Los endpoints responden `disponible: false` |
 | 18 | **`FRONTEND.md` contradice al backend en 7 puntos** (§14): `fenomeno=` vs `fenomenos=`, citas con `quote`/`score`, `chart: "map"`, `lugar`, `group_by: "mes"`, fechas completas, `/api/graph` | Quien construya el tablero con esa guía escribirá código que el backend rechaza o ignora | Corregir `FRONTEND.md` con la tabla de §14 |
 | 19 | ✅ `/api/trace` **cerrado en `86e8244`** (solo con `ARPIA_DEBUG_TRACE`). El resto de `/api/*` sigue siendo público y de solo lectura, en los tres dominios | Lo público ya no expone preguntas ni salidas del modelo | Confirmar que `ARPIA_DEBUG_TRACE` queda vacío en Coolify |
-| 20 | ✅ **Resuelto en el chat.** Antes el chat no usaba `/api/evidence`: hacer clic en una cita no abría el fragmento, y faltaban el tooltip y el visor que sugirió ADL | `FRONTEND.md` lo llama "requisito obligatorio de la especificación" | `js/referencias.js` (tooltip y visor), `obtenerEvidencia` y `obtenerDocumento` en `api.js`, enganche en `chat.js`. Detalle en §14, "Referencias". Pendiente: el tablero no usa las referencias todavía |
+| 20 | ✅ **Resuelto en el chat.** Antes el chat no usaba `/api/evidence`: hacer clic en una cita no abría el fragmento, y faltaban el tooltip y el visor que sugirió ADL | `FRONTEND.md` lo llama "requisito obligatorio de la especificación" | `js/referencias.js` (tooltip y visor), `obtenerEvidencia` y `obtenerDocumento` en `api.js`, enganche en `chat.js`. Detalle en §14, "Referencias". El tablero también las usa (respuestas del asistente y sección "Fuente") |
 | 21 | ✅ **Resuelto con el presupuesto de tiempo (#6).** Timeout del front (90 s) vs peor caso del backend | — | — |
 | 22 | ✅ **Resuelto.** El orquestador fallaba con el modelo real: `gpt-oss-120b` devolvía la clave `Pasos` (el `title` del esquema) y `Plan` (`extra="forbid"`) la rechazaba, con lo que el respaldo mandaba todo al documental. Medido antes: 1 de 6 llamadas válidas; después: 6 de 6, y las tres preguntas típicas responden por `/chat` con el agente correcto | — | `plan.py`: `Plan` y `Paso` normalizan las claves (`Pasos` → `pasos`, `Group By` → `group_by`) y siguen rechazando campos inexistentes. `plan_de_respaldo` manda el conteo inequívoco al analítico (y suma el visualizador si piden una gráfica). `executors._dimension` ya no depende de las tildes. No se añadió reintento: la causa raíz está cerrada y cada reintento costaría tokens |
 | 23 | ✅ **Resuelto.** El caché guardaba como buena la respuesta del plan de respaldo (`estado: ok`) y repetir la pregunta la devolvía con `cache:1.00` hasta reiniciar | — | `planificar` anota `turnlog.marcar_no_cacheable("plan_de_respaldo")` en sus dos salidas al respaldo y `run_chat` no guarda en el caché un turno marcado (queda en el log). El `estado` sigue siendo `ok`. Cualquier agente puede usar la misma marca para otros degradados |
@@ -726,9 +724,9 @@ dónde esa guía no coincide con el backend.
 | Pieza | Estado |
 |---|---|
 | `chat.html`, `css/tokens.css`, `css/app.css`, `js/api.js`, `js/chat.js` | ✅ existen |
-| `dashboard.html` | ❌ no existe: `dashboard.*` responde 200 con un aviso legible |
-| `vendor/` (Plotly, Leaflet) | ❌ no existe |
-| `viewspec.js`, `charts.js`, `map.js`, `graph.js` | ❌ no existen (los describe `FRONTEND.md`) |
+| `dashboard.html`, `css/tablero.css`, `js/dashboard.js`, `js/viewspec.js` | ✅ existen; el tablero abre con datos reales y sin datos de ejemplo |
+| `vendor/` | Chart.js ✅ en uso; Leaflet sigue en el repo pero **ya no se carga** (el corpus no tiene lugar) |
+| `charts.js`, `map.js`, `graph.js` | ➖ no existen ni hacen falta: los gráficos viven en `dashboard.js`; mapa y grafo no tienen datos |
 | Streamlit (`src/ui/app.py`) | sigue en el repo pero **ya no se despliega** |
 
 - **HTML plano, sin framework, sin build.** `chat.html` no tiene ninguna referencia externa
@@ -766,7 +764,7 @@ exacto: es la trazabilidad que exige `RETO.md`.
 ### Referencias: ver de dónde sale cada afirmación (hecho en backend y en el chat)
 
 ADL sugirió que, al pasar el ratón por una referencia, se vea de dónde sale, y que con un clic se
-abra el documento o el fragmento. **Está implementado en el chat** (el tablero no lo usa todavía). Tres
+abra el documento o el fragmento. **Está implementado en el chat y en el tablero.** Tres
 niveles, de menor a mayor costo:
 
 | Pieza | Dónde |
@@ -815,13 +813,38 @@ nunca aceptar una ruta.
   **opcionales**: una cifra agregada o el modo stub pueden no traerlos. Ocultar la parte que falte.
 - Todos los endpoints responden 200; un fallo llega como `disponible: false` con `motivo`.
 
-**Mapeo `ViewSpec → endpoint` (propuesta, aún no implementada en el frontend).** Los
+**Mapeo `ViewSpec → endpoint` (implementado en `js/viewspec.js`, función `cargar`).** Los
 parámetros de `/api/aggregate` reflejan los campos del `ViewSpec`:
 
 | `chart` | Endpoint sugerido |
 |---|---|
 | `bar`, `stacked_bar`, `donut`, `table`, `kpi` | `GET /api/aggregate` con `metrica`, `group_by`, `fenomenos`, `desde`, `hasta` |
 | `timeline` | `GET /api/timeline` (o `/api/aggregate` con `group_by=anio`) |
+
+### El tablero, sin datos inventados
+
+`RETO.md` no admite datos simulados en la versión desplegada. El prototipo del tablero dibujaba al abrir
+una serie 2020–2025, marcadores en Bogotá, Cali y Medellín y nodos "País A" y "Empresa B", también en modo
+live. Ahora:
+
+- **Abre con datos reales:** "Documentos por año" (una serie por fenómeno) y "Documentos por fenómeno",
+  desde `/api/aggregate`, con la insignia "Del corpus". Una vista pedida al agente dice "Del agente".
+- **Mapa y relaciones dicen "Sin datos":** el corpus no trae lugar ni actores. El mapa muestra la explicación
+  del propio backend (`/api/geo`); no hay marcadores, teselas externas ni nodos de ejemplo.
+- **Los datos simulados solo existen en modo stub** (`viewspec.datosSimulados`), marcados "Simulado".
+- **Una prueba lo protege:** `tests/test_tablero_sin_datos_inventados.py` falla si vuelve alguno.
+
+**Corrección del contrato.** El tablero esperaba filas `{grupo, fenomeno, valor}` y una cobertura
+`{con_dato, total}`; el backend devuelve `{clave, valor, doc_ids}` y otros nombres, además de no traer el
+fenómeno. Por eso nunca pudo mostrar un dato real. `viewspec.js` (`cargar`) traduce: pide una vez por fenómeno
+(salvo cuando la dimensión es el fenómeno) y cada fila hereda el suyo, y calcula la cobertura solo para el año
+(en las demás dimensiones "100 % tienen año" sería falso). Si el índice no está, muestra un mensaje y no
+inventa nada. Probado con 10 pruebas JS (`tests/js/viewspec.test.mjs`).
+
+**Referencias en el tablero.** Los `doc_id` de la respuesta del asistente son referencias interactivas (tooltip
+y visor, igual que en el chat) y la sección "Fuente" tiene un botón "Abrir documento". Un clic en un
+segmento de la dona o de las barras muestra los documentos que lo sustentan y lo abre en el visor (sin
+fragmento citado: una cifra agregada solo conoce el documento).
 
 ### `FRONTEND.md` frente al backend real
 
@@ -840,4 +863,4 @@ Quien construya el tablero debe seguir **esta columna**, no la guía:
 | Mapas | Leaflet con capas por fenómeno | `/api/geo` responde siempre "no disponible"; no hay dato geográfico |
 
 El frontend **ya lee** los campos correctos en `chat.js`; la discrepancia está en la guía y
-en lo que aún no se ha construido (el tablero).
+en lo que no se ha construido (mapa y grafo: no hay datos que dibujar).

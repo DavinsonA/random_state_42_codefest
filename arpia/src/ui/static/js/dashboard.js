@@ -1,19 +1,30 @@
 // Tablero del Reto 2 con el diseno del prototipo: asistente a la izquierda y
 // cuatro graficos a la derecha.
 //
-// Al cargar, los graficos muestran datos PROVISIONALES (marcados como tales).
-// Cada respuesta del agente que trae `view_spec` reemplaza el panel que
-// corresponde con datos del backend (/api/aggregate):
+// NINGUN dato se inventa (RETO.md: datos reales en la version desplegada). Al
+// abrir, los dos graficos con datos se llenan desde el corpus (/api/aggregate) y
+// dicen "Del corpus". Cada respuesta del agente que trae `view_spec` reemplaza el
+// panel que corresponde (y dice "Del agente"):
 //   timeline                       -> "Evolucion temporal" (linea por fenomeno)
 //   bar/stacked_bar/donut/table/kpi -> "Distribucion de eventos"
-// El mapa y las relaciones siguen provisionales: el corpus aun no tiene
-// ubicaciones ni actores (ver ViewSpec en src/api/contracts.py).
+// El mapa y las relaciones NO tienen datos: el corpus no trae lugar ni actores
+// (ver /api/geo y ViewSpec en src/api/contracts.py). Los paneles lo dicen, sin
+// marcadores ni nodos de ejemplo.
 //
-// Chart.js y Leaflet estan vendorizados (static/vendor/) y llegan como
-// globales `Chart` y `L`. Todo texto del backend entra con textContent.
+// Chart.js esta vendorizado (static/vendor/) y llega como global `Chart`. Todo
+// texto del backend entra con textContent.
 
-import { enviarChat, obtenerSalud } from "./api.js";
-import { FENOMENOS, cargar, normalizar, tituloPorDefecto, vistaDesdeHash } from "./viewspec.js";
+import { enviarChat, obtenerGeo, obtenerSalud } from "./api.js";
+import { abrirVisor, enlazarReferencias } from "./referencias.js";
+import {
+    FENOMENOS,
+    VISTA_INICIAL,
+    VISTA_TIEMPO_INICIAL,
+    cargar,
+    normalizar,
+    tituloPorDefecto,
+    vistaDesdeHash,
+} from "./viewspec.js";
 
 const $ = (id) => document.getElementById(id);
 const fmt = new Intl.NumberFormat("es-CO");
@@ -43,21 +54,17 @@ function el(etiqueta, clase, texto) {
 function marcarPanel(idPanel, origen, nota) {
     const panel = $(idPanel);
     const insignia = panel.querySelector(".insignia-panel");
-    const textos = { provisional: "Provisional", simulado: "Simulado", agente: "Del agente" };
+    const textos = {
+        cargando: "Cargando",
+        corpus: "Del corpus",
+        agente: "Del agente",
+        simulado: "Simulado",
+        sin_datos: "Sin datos",
+    };
     insignia.dataset.origen = origen;
     insignia.textContent = textos[origen];
     panel.querySelector(".grafico-nota").textContent = nota || "";
 }
-
-// -- datos provisionales (los del prototipo) ------------------------------------
-
-const NOTA_PROVISIONAL = "Datos de ejemplo: se reemplazan con la respuesta del agente.";
-
-const PROVISIONAL = {
-    tiempo: { labels: ["2020", "2021", "2022", "2023", "2024", "2025"], valores: [35, 72, 91, 87, 120, 155] },
-    eventos: { fenomenos: ["F1", "F2", "F3"], valores: [40, 35, 25] },
-    puntos: [[4.711, -74.072, "Bogotá"], [3.451, -76.532, "Cali"], [6.244, -75.581, "Medellín"]],
-};
 
 // -- evolucion temporal -----------------------------------------------------------
 
@@ -98,13 +105,6 @@ function serie(label, data, color, meta = []) {
     };
 }
 
-function tiempoProvisional() {
-    const { labels, valores } = PROVISIONAL.tiempo;
-    dibujarTiempo(labels, [serie("Eventos (ejemplo)", valores, tok("space"))]);
-    $("titulo-tiempo").textContent = "Evolución temporal";
-    marcarPanel("panel-tiempo", "provisional", NOTA_PROVISIONAL);
-}
-
 function tiempoDesdeDatos(filas) {
     const anios = [...new Set(filas.map((f) => f.grupo).filter((g) => /^\d{4}$/.test(g)))].sort();
     const fens = [...new Set(filas.map((f) => f.fenomeno).filter(Boolean))].sort();
@@ -141,13 +141,6 @@ function dona(labels, valores, colores, meta = []) {
             onClick: (_ev, e) => e[0] && meta[e[0].index] && mostrarDocs(meta[e[0].index]),
         },
     };
-}
-
-function eventosProvisional() {
-    const { fenomenos, valores } = PROVISIONAL.eventos;
-    dibujarEventos(dona(fenomenos.map((f) => `${f} · ${FENOMENOS[f]}`), valores, fenomenos.map(colorFenomeno)));
-    $("titulo-eventos").textContent = "Distribución de eventos";
-    marcarPanel("panel-eventos", "provisional", NOTA_PROVISIONAL);
 }
 
 /** Suma filas por una clave, conservando doc_ids. */
@@ -202,43 +195,55 @@ function eventosDesdeDatos(spec, filas) {
     });
 }
 
-// -- mapa y relaciones (provisionales) ----------------------------------------------
+// -- mapa y relaciones: sin datos -----------------------------------------------------
 
-function mapaProvisional() {
-    const mapa = L.map("mapa", { attributionControl: true }).setView([4.6, -74.1], 5);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap",
-        maxZoom: 18,
-    }).addTo(mapa);
-    // circleMarker en vez de marker: no depende de imagenes externas de Leaflet.
-    for (const [lat, lon, nombre] of PROVISIONAL.puntos) {
-        L.circleMarker([lat, lon], {
-            radius: 7,
-            color: tok("text"),
-            weight: 1.5,
-            fillColor: tok("space"),
-            fillOpacity: 0.9,
-        }).addTo(mapa).bindPopup(nombre);
+/** El corpus no trae lugar: el panel lo dice con las palabras del backend, sin
+ *  marcadores ni coordenadas de ejemplo. */
+async function mapaSinDatos() {
+    const texto = $("mapa");
+    marcarPanel("panel-mapa", "sin_datos", "");
+    try {
+        const g = await obtenerGeo();
+        // El backend manda dos frases sin puntuacion final ni mayuscula inicial.
+        const frases = [g.motivo, g.alternativa]
+            .filter(Boolean)
+            .map((f) => f.trim().replace(/[.\s]+$/, ""))
+            .map((f) => f[0].toUpperCase() + f.slice(1));
+        texto.textContent = frases.length ? `${frases.join(". ")}.` : "El corpus no trae lugar por documento.";
+    } catch {
+        texto.textContent = "El corpus no trae lugar por documento, así que no hay mapa que dibujar.";
     }
-    marcarPanel("panel-mapa", "provisional", "Ubicaciones de ejemplo: el corpus aún no trae lugar por documento.");
+}
+
+function relacionesSinDatos() {
+    marcarPanel("panel-relaciones", "sin_datos", "");
 }
 
 // -- vista del agente -----------------------------------------------------------------
 
-async function aplicarVista(spec) {
+/** Aplica una vista al panel que le corresponde.
+ *
+ * `inicial`: es una de las vistas con las que abre el tablero, no una peticion
+ * del analista. No resalta el panel ni desplaza la pagina, y dice "Del corpus"
+ * en vez de "Del agente".
+ */
+async function aplicarVista(spec, { inicial = false } = {}) {
     const turno = ++estado.carga;
     const esTiempo = spec.chart === "timeline";
     const idPanel = esTiempo ? "panel-tiempo" : "panel-eventos";
     const titulo = spec.titulo || tituloPorDefecto(spec);
+    const origen = inicial ? "corpus" : "agente";
 
-    document.querySelectorAll(".grafico.activo").forEach((p) => p.classList.remove("activo"));
-    $(idPanel).classList.add("activo");
+    if (!inicial) {
+        document.querySelectorAll(".grafico.activo").forEach((p) => p.classList.remove("activo"));
+        $(idPanel).classList.add("activo");
+    }
 
     const { datos, error } = await cargar(spec, { modoStub: estado.modoStub });
     if (turno !== estado.carga) return;  // llego otra vista mientras cargaba
 
     if (error) {
-        marcarPanel(idPanel, "provisional", `${error} Se mantienen los datos de ejemplo.`);
+        marcarPanel(idPanel, "sin_datos", error);
         return;
     }
 
@@ -250,7 +255,7 @@ async function aplicarVista(spec) {
     const nota = [...new Set(notas.filter(Boolean))].join(" ");
 
     if (!datos.filas.length) {
-        marcarPanel(idPanel, datos.simulado ? "simulado" : "agente", `${titulo}: no hay datos para estos filtros. ${nota}`);
+        marcarPanel(idPanel, datos.simulado ? "simulado" : "sin_datos", `${titulo}: no hay datos para estos filtros. ${nota}`);
         return;
     }
 
@@ -261,17 +266,27 @@ async function aplicarVista(spec) {
         eventosDesdeDatos(spec, datos.filas);
         $("titulo-eventos").textContent = titulo;
     }
-    marcarPanel(idPanel, datos.simulado ? "simulado" : "agente", nota);
-    $(idPanel).scrollIntoView({ behavior: "smooth", block: "nearest" });
+    marcarPanel(idPanel, datos.simulado ? "simulado" : origen, nota);
+    if (!inicial) $(idPanel).scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 // -- fuente: trazabilidad -------------------------------------------------------------
+
+/** El boton de la seccion Fuente abre el visor del documento (js/referencias.js).
+ *  `cita` puede no traer `chunk_id` (una cifra agregada solo sabe el documento):
+ *  entonces el visor abre el documento desde el principio. */
+function ofrecerDocumento(cita) {
+    const boton = $("abrir-fuente");
+    boton.hidden = !cita;
+    boton.onclick = cita ? () => abrirVisor(cita, boton) : null;
+}
 
 function mostrarDocs({ titulo, doc_ids }) {
     const docs = [...new Set(doc_ids || [])];
     $("docId").textContent = docs.length ? `${docs.slice(0, 3).join(", ")}${docs.length > 3 ? ` (+${docs.length - 3})` : ""}` : "---";
     $("docId").title = docs.join("\n");
     $("chunkId").textContent = docs.length ? `agregado · ${titulo}` : "---";
+    ofrecerDocumento(docs.length ? { doc_id: docs[0] } : null);
 }
 
 function mostrarCitas(citas) {
@@ -281,6 +296,7 @@ function mostrarCitas(citas) {
     $("docId").title = citas.map((x) => x.doc_id).join("\n");
     $("chunkId").textContent = c.chunk_id;
     $("chunkId").title = citas.map((x) => x.chunk_id).join("\n");
+    ofrecerDocumento(c);
 }
 
 // -- asistente --------------------------------------------------------------------------
@@ -314,6 +330,7 @@ function mostrarRespuesta(datos) {
     for (const parrafo of String(datos.respuesta || "(respuesta vacía)").split(/\n\s*\n/)) {
         if (parrafo.trim()) caja.append(el("p", null, parrafo.trim()));
     }
+    enlazarReferencias(caja, datos.citations);
     const md = datos.metadata || {};
     const meta = el("div", "respuesta-meta");
     for (const a of md.agentes_invocados || []) meta.append(el("span", "chip-agente", NOMBRES_AGENTE[a] || a));
@@ -397,15 +414,18 @@ if (chat) {
     $("enlace-chat").hidden = false;
 }
 
-tiempoProvisional();
-eventosProvisional();
-mapaProvisional();
-marcarPanel("panel-relaciones", "provisional", "Relaciones de ejemplo: el corpus aún no trae actores ni vínculos.");
+mapaSinDatos();
+relacionesSinDatos();
 
 // La salud decide si se permiten datos simulados (solo en modo stub).
 await refrescarSalud();
 setInterval(refrescarSalud, 60000);
 
-// Vista enviada desde el chat ("Abrir en el tablero").
-const inicial = vistaDesdeHash();
-if (inicial) aplicarVista(inicial);
+// Las dos vistas con datos abren llenas desde el corpus. En serie, no en
+// paralelo: `aplicarVista` descarta la respuesta de una vista si llego otra despues.
+await aplicarVista(VISTA_TIEMPO_INICIAL, { inicial: true });
+await aplicarVista(VISTA_INICIAL, { inicial: true });
+
+// Vista enviada desde el chat ("Abrir en el tablero"): reemplaza a la inicial.
+const desdeChat = vistaDesdeHash();
+if (desdeChat) aplicarVista(desdeChat);

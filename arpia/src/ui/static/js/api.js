@@ -94,12 +94,21 @@ export function obtenerDocumento(docId, { chunkId, posicion, ventana } = {}) {
     return pedir(`/api/document/${encodeURIComponent(docId)}${consulta ? `?${consulta}` : ""}`);
 }
 
-/** GET /api/aggregate — datos de una vista del tablero.
+/** GET /api/geo — el corpus no trae lugar; responde `{ disponible: false, motivo, alternativa }`. */
+export function obtenerGeo() {
+    return pedir("/api/geo");
+}
+
+/** GET /api/aggregate — datos de una vista del tablero. Responde 200 siempre.
  *
- * PROPUESTO, aun no existe en el backend (pedido al arquitecto). Forma esperada:
- *   { filas: [{ grupo, fenomeno, valor, doc_ids: [...] }],
- *     total, cobertura: { con_dato, total }, nota, mode }
- * Lanza ApiError con status 404 mientras no exista.
+ * Forma real del backend (src/api/dashboard.py):
+ *   { disponible, group_by, metrica, total,
+ *     filas: [{ clave, valor, doc_ids: [...] }],
+ *     cobertura: { documentos_universo, documentos_en_dimension, documentos_contados,
+ *                  sin_dato_en_la_dimension, excluidos_por_fecha } }
+ * o `{ disponible: false, motivo }` si el indice no esta. Ninguna fila trae el
+ * fenomeno: quien lo necesite pide una vez por fenomeno (`fenomenos`).
+ * `viewspec.js` traduce esta forma a la que usan los graficos.
  */
 export function obtenerAgregado({ metrica, group_by, fenomenos, desde, hasta }) {
     const q = new URLSearchParams();

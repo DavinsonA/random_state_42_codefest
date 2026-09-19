@@ -7,12 +7,11 @@
     <meta name="description" content="Tablero de A.R.P.I.A.: el agente actualiza las visualizaciones según la pregunta, con trazabilidad a cada documento.">
 
     <!-- librerias vendorizadas: nunca CDN (FRONTEND.md) -->
-    <link rel="stylesheet" href="/static/vendor/leaflet.css">
     <link rel="stylesheet" href="/static/css/tokens.css">
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/tablero.css">
+    <link rel="stylesheet" href="/static/css/referencias.css">
     <script src="/static/vendor/chart.umd.min.js"></script>
-    <script src="/static/vendor/leaflet.js"></script>
     <script type="module" src="/static/js/dashboard.js"></script>
 </head>
 <body class="pagina-tablero">
@@ -65,6 +64,7 @@
                 <h3>Fuente</h3>
                 <p>doc_id: <span id="docId">---</span></p>
                 <p>chunk_id: <span id="chunkId">---</span></p>
+                <button type="button" class="boton boton-texto" id="abrir-fuente" aria-haspopup="dialog" hidden>Abrir documento</button>
             </div>
 
         </section>
@@ -75,7 +75,7 @@
             <article class="grafico" id="panel-tiempo">
                 <div class="grafico-cabeza">
                     <h3 id="titulo-tiempo">Evolución temporal</h3>
-                    <span class="insignia-panel" data-origen="provisional">Provisional</span>
+                    <span class="insignia-panel" data-origen="cargando">Cargando</span>
                 </div>
                 <p class="grafico-nota" id="nota-tiempo"></p>
                 <div class="lienzo"><canvas id="graficoTiempo" role="img" aria-label="Evolución temporal"></canvas></div>
@@ -84,16 +84,16 @@
             <article class="grafico" id="panel-mapa">
                 <div class="grafico-cabeza">
                     <h3>Distribución geográfica</h3>
-                    <span class="insignia-panel" data-origen="provisional">Provisional</span>
+                    <span class="insignia-panel" data-origen="cargando">Cargando</span>
                 </div>
                 <p class="grafico-nota" id="nota-mapa"></p>
-                <div id="mapa" role="img" aria-label="Distribución geográfica"></div>
+                <div class="vacio" id="mapa"></div>
             </article>
 
             <article class="grafico" id="panel-eventos">
                 <div class="grafico-cabeza">
                     <h3 id="titulo-eventos">Distribución de eventos</h3>
-                    <span class="insignia-panel" data-origen="provisional">Provisional</span>
+                    <span class="insignia-panel" data-origen="cargando">Cargando</span>
                 </div>
                 <p class="grafico-nota" id="nota-eventos"></p>
                 <div class="lienzo"><canvas id="graficoEventos" role="img" aria-label="Distribución de eventos"></canvas></div>
@@ -102,14 +102,10 @@
             <article class="grafico" id="panel-relaciones">
                 <div class="grafico-cabeza">
                     <h3>Relaciones</h3>
-                    <span class="insignia-panel" data-origen="provisional">Provisional</span>
+                    <span class="insignia-panel" data-origen="cargando">Cargando</span>
                 </div>
                 <p class="grafico-nota" id="nota-relaciones"></p>
-                <div class="relaciones">
-                    <div class="nodo centro">Organización</div>
-                    <div class="nodo arriba">País A</div>
-                    <div class="nodo abajo">Empresa B</div>
-                </div>
+                <p class="vacio" id="relaciones">El corpus no trae actores ni vínculos entre ellos, así que no hay relaciones que dibujar. No se inventan.</p>
             </article>
 
         </section>

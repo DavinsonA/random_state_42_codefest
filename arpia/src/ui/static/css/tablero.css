@@ -342,9 +342,29 @@
     letter-spacing: 0.04em;
 }
 
-.insignia-panel[data-origen="provisional"] { color: var(--arpia-text-muted); }
+.insignia-panel[data-origen="cargando"],
+.insignia-panel[data-origen="sin_datos"] { color: var(--arpia-text-muted); }
 .insignia-panel[data-origen="simulado"] { color: var(--arpia-warning); }
+.insignia-panel[data-origen="corpus"] { color: var(--arpia-info); }
 .insignia-panel[data-origen="agente"] { color: var(--arpia-success); }
+
+/* panel sin datos: el corpus no trae lugar ni actores; se dice, no se dibuja */
+.pagina-tablero .vacio {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    min-height: 140px;
+    padding: 12px;
+    color: var(--t-texto-suave);
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.pagina-tablero .fuente .boton {
+    margin-top: 8px;
+}
 
 .grafico-nota {
     min-height: 0;
