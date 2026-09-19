@@ -1,0 +1,39 @@
+/* Tokens de color de A.R.P.I.A. UNICO archivo del frontend con hexadecimales.
+ *
+ * Espejo de docs/design/design-tokens.json. Si cambia el JSON, cambia esto en
+ * el mismo commit. Si un color no existe aqui, no existe en la interfaz.
+ */
+
+:root {
+    /* foundation */
+    --arpia-void: #05040D;
+    --arpia-bg: #040C1D;
+    --arpia-surface: #0F1B30;
+    --arpia-elevated: #16243A;
+    --arpia-border: #233E4D;
+    --arpia-border-active: #2B4B5D;
+
+    /* brand */
+    --arpia-deep: #003F5E;
+    --arpia-primary: #3566CC;
+    --arpia-electric: #1B68BC;
+    --arpia-space: #54B1DC;
+
+    /* fenomenos: identifican fenomeno, no estado */
+    --arpia-f1: #3566CC;   /* IA y Capacidades Estrategicas */
+    --arpia-f2: #54B1DC;   /* Seguridad del Entorno Espacial */
+    --arpia-f3: #10B981;   /* Dinamicas Territoriales */
+
+    /* semantica del sistema */
+    --arpia-success: #10B981;
+    --arpia-info: #54B1DC;
+    --arpia-warning: #F59E0B;
+    --arpia-critical: #EF4444;
+    --arpia-evidence: #F59E0B;  /* reservado a citas y trazabilidad */
+
+    /* texto */
+    --arpia-text: #F0F6FC;
+    --arpia-text-secondary: #A1A5A9;
+    --arpia-text-muted: #6A737C;
+    --arpia-text-disabled: #49626F;
+}
