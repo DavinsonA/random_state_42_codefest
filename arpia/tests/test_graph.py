@@ -23,6 +23,7 @@ from langgraph.checkpoint.memory import InMemorySaver  # noqa: E402
 
 from src.agents import executors, graph, orchestrator  # noqa: E402
 from src.agents.plan import Paso, Plan  # noqa: E402
+from src.retrieval import aggregates  # noqa: E402
 from src.retrieval.index import Hit  # noqa: E402
 from src.tools import corpus  # noqa: E402
 
@@ -41,10 +42,26 @@ class FakeLLM:
         self.llamadas: list[str] = []
         self.fallar_plan = False
         self.fallar_redaccion = False
+        self.spec = None  # se construye perezosamente para no importar arriba
 
     # -- planificacion ---------------------------------------------------
     def with_structured_output(self, schema, include_raw: bool = False):  # noqa: ARG002
+        """El mismo cliente sirve al orquestador (Plan) y al visualizador
+        (ViewSpec): se distingue por el esquema pedido."""
+        from src.api.contracts import ViewSpec
+
+        if schema is ViewSpec:
+            return SimpleNamespace(invoke=self._vista)
         return SimpleNamespace(invoke=self._plan)
+
+    def _vista(self, mensajes):  # noqa: ARG002
+        from src.api.contracts import ViewSpec
+
+        self.llamadas.append("vista")
+        crudo = SimpleNamespace(
+            content="", usage_metadata={"input_tokens": 150, "output_tokens": 25}
+        )
+        return {"raw": crudo, "parsed": ViewSpec(chart="bar", group_by="organizacion")}
 
     def _plan(self, mensajes):
         self.llamadas.append("plan")
@@ -84,6 +101,10 @@ class FakeLLM:
     def redacciones(self) -> int:
         return self.llamadas.count("redaccion")
 
+    @property
+    def vistas(self) -> int:
+        return self.llamadas.count("vista")
+
 
 class FakeIndex:
     """Indice falso. `score` decide si la evidencia se considera suficiente."""
@@ -120,16 +141,39 @@ def entorno(monkeypatch):
     monkeypatch.setenv("ARPIA_MODE", "live")
     config.get_settings.cache_clear()
 
-    def make(plan: Plan | None = None, score: float = 0.7):
+    def make(plan: Plan | None = None, score: float = 0.7, n: int = 3):
         llm = FakeLLM(plan=plan)
-        indice = FakeIndex(score=score)
+        indice = FakeIndex(score=score, n=n)
         monkeypatch.setattr(orchestrator, "_llm", lambda: llm)
-        monkeypatch.setattr(graph, "_llm", lambda agente: llm)
+        monkeypatch.setattr(executors, "_llm", lambda agente: llm)
         monkeypatch.setattr(corpus, "_index", indice)
+        monkeypatch.setattr(aggregates, "tabla", lambda: TABLA_FALSA)
+        aggregates.reset()
         return graph.build_graph(checkpointer=InMemorySaver()), llm, indice
 
     yield make
     config.get_settings.cache_clear()
+
+
+#: Tabla minima para el agente analitico. No toca el corpus real.
+TABLA_FALSA = [
+    {
+        "doc_id": "F1-A",
+        "fenomeno": "F1",
+        "organizacion": "CSET",
+        "formato": "pdf",
+        "anio": 2024,
+        "n_fragmentos": 10,
+    },
+    {
+        "doc_id": "F2-B",
+        "fenomeno": "F2",
+        "organizacion": "CSIS",
+        "formato": "pdf",
+        "anio": 2025,
+        "n_fragmentos": 5,
+    },
+]
 
 
 def _config(hilo: str = "hilo-1") -> dict:
@@ -173,6 +217,63 @@ def test_sin_evidencia_replanifica_una_sola_vez(entorno):
     assert len(indice.consultas) == 2
 
 
+def test_una_pregunta_con_vista_cuesta_tres_llamadas(entorno):
+    """Plan, view_spec y redaccion. El documental y el visualizador corren en
+    paralelo, pero el paralelismo ahorra tiempo, no tokens."""
+    plan = Plan(
+        pasos=[
+            Paso(agente="agente_documental", consulta="volumen por organizacion"),
+            Paso(agente="agente_visualizador", consulta="comparame las fuentes"),
+        ],
+        paralelo=True,
+    )
+    g, llm, _ = entorno(plan=plan)
+    out = g.invoke({"question": "comparame las fuentes"}, _config())
+    assert llm.planes == 1
+    assert llm.redacciones == 1
+    assert llm.vistas == 1
+    assert out["view_spec"] is not None
+    assert "tablero" in out["answer"]
+
+
+def test_tres_busquedas_documentales_cuestan_una_redaccion(entorno):
+    """Redactar por paso en vez de por turno triplicaria el coste del bloque de
+    eficiencia sin mejorar la respuesta."""
+    plan = Plan(
+        pasos=[Paso(agente="agente_documental", consulta=f"tema {i}") for i in range(3)],
+        paralelo=True,
+    )
+    g, llm, indice = entorno(plan=plan)
+    g.invoke({"question": "tres temas"}, _config())
+    assert len(indice.consultas) == 3
+    assert llm.redacciones == 1
+
+
+def test_una_replanificacion_no_paga_dos_redacciones_ni_dos_vistas(entorno):
+    """La evidencia definitiva solo se conoce tras la ultima pasada: redactar
+    antes seria pagar dos veces por el mismo texto."""
+    plan = Plan(
+        pasos=[
+            Paso(agente="agente_documental", consulta="nada"),
+            Paso(agente="agente_visualizador", consulta="una vista"),
+        ],
+        paralelo=True,
+    )
+    g, llm, _ = entorno(plan=plan, score=0.1)
+    g.invoke({"question": "algo que no esta"}, _config())
+    assert llm.planes == 2, "replanifica una vez"
+    assert llm.redacciones == 1, "redacta una sola vez, al final"
+    assert llm.vistas == 1, "la vista no depende de la evidencia: no se repite"
+
+
+def test_el_analitico_no_suma_llamadas_al_modelo(entorno):
+    plan = Plan(pasos=[Paso(agente="agente_analitico", consulta="cuantos por tema")])
+    g, llm, _ = entorno(plan=plan)
+    g.invoke({"question": "cuantos documentos hay por fenomeno"}, _config())
+    assert llm.planes == 1
+    assert llm.redacciones == 0, "las cifras ya vienen redactadas, sin gastar nada"
+
+
 def test_con_evidencia_no_replanifica(entorno):
     g, llm, _ = entorno(score=0.9)
     g.invoke({"question": "algo que si esta"}, _config())
@@ -208,11 +309,20 @@ def test_un_agente_no_implementado_no_tumba_el_turno(entorno):
 
 
 def test_sin_evidencia_lo_dice_en_vez_de_inventar(entorno):
-    plan = Plan(pasos=[Paso(agente="agente_visualizador", consulta="x")])
-    g, llm, _ = entorno(plan=plan)
-    out = g.invoke({"question": "algo"}, _config())
+    g, llm, _ = entorno(n=0)  # el indice no devuelve nada
+    out = g.invoke({"question": "algo que no existe"}, _config())
     assert "No encontre evidencia" in out["answer"]
     assert llm.redacciones == 0  # no se paga una redaccion sin nada que redactar
+
+
+def test_una_vista_sola_no_dispara_replanificacion(entorno):
+    """Un turno que solo pide una vista no tiene evidencia que mejorar:
+    replanificar costaria una llamada sin ninguna posibilidad de servir."""
+    plan = Plan(pasos=[Paso(agente="agente_visualizador", consulta="grafica")])
+    g, llm, _ = entorno(plan=plan)
+    out = g.invoke({"question": "muestrame una grafica"}, _config())
+    assert llm.planes == 1
+    assert out["view_spec"] is not None
 
 
 # -- los tres fallos de estado que documento CONTRATO_GRAFO.md ---------------
@@ -312,6 +422,9 @@ def test_el_filtro_por_fenomeno_no_deja_la_evidencia_en_nada(entorno):
     assert len(out["evidence"]) == 3
 
 
-def test_ejecutor_desconocido_devuelve_error_en_vez_de_lanzar():
+def test_ejecutor_no_registrado_devuelve_error_en_vez_de_lanzar(monkeypatch):
+    """Un agente que el plan pide y que aun no existe degrada el turno, no lo
+    tumba. Pasa cada vez que se anade un agente a la card antes que al codigo."""
+    monkeypatch.delitem(executors.EJECUTORES, "agente_analitico")
     r = executors.ejecutar(Paso(agente="agente_analitico", consulta="x"))
     assert r.error and not r.evidencia

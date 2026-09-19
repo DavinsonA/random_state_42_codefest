@@ -44,6 +44,14 @@ def test_anio_ignora_cifras_que_no_son_fechas(ruta):
     assert anio(ruta) is None
 
 
+def test_anio_descarta_fechas_futuras():
+    """El corpus real traia un documento "fechado" en 2030: es un titulo tipo
+    "Agenda 2030", no su publicacion. Un punto en el futuro de una linea de
+    tiempo se lee como dato y es un artefacto del nombre de archivo."""
+    assert anio("F1/ONU/agenda-2030-desarrollo.pdf") is None
+    assert anio("F1/ONU/agenda-2030-informe-2024.pdf") == 2024
+
+
 def test_traduccion_entre_el_entero_del_corpus_y_el_id_del_contrato():
     """La metadata usa `fenomeno: 2`; el contrato usa `"F2"`."""
     assert fenomeno_id(2) == "F2"
