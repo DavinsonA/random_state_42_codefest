@@ -27,7 +27,7 @@ uv run streamlit run src/ui/app.py                     # UI
 
 Coolify construye esta carpeta desde `Dockerfile` (build pack: Dockerfile).
 Ver [`../arpia-bundle/.claude/skills/coolify-deploy/SKILL.md`](../arpia-bundle/.claude/skills/coolify-deploy/SKILL.md)
-para el procedimiento completo y `deploy-test/README.md` (raíz del monorepo)
+para el procedimiento completo
 para la configuración exacta del panel.
 
 ```bash

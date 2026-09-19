@@ -7,7 +7,6 @@ código; el reto se publica el 18 de septiembre.
 random_state_42_codefest/
 ├── arpia/            el aplicativo — lo único que se despliega y se califica
 ├── arpia-bundle/     el método — directivas de agente, skills, scripts de desarrollo
-└── deploy-test/      app dummy para validar la cadena GitHub → Coolify → URL pública
 ```
 
 ## Dónde trabajar
@@ -15,7 +14,6 @@ random_state_42_codefest/
 - **Código de producto, API, UI, tema visual, tests**: [`arpia/`](arpia/README.md).
 - **Cómo trabajar con agentes de código, skills, scripts de iteración/preflight**:
   [`arpia-bundle/`](arpia-bundle/README.md).
-- **Validación de despliegue en Coolify**: [`deploy-test/`](deploy-test/README.md)
   (se elimina antes de la entrega final).
 
 ## Despliegue
