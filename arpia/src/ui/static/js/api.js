@@ -94,6 +94,20 @@ export function obtenerDocumento(docId, { chunkId, posicion, ventana } = {}) {
     return pedir(`/api/document/${encodeURIComponent(docId)}${consulta ? `?${consulta}` : ""}`);
 }
 
+/** GET /api/progress?sesion= — pasos ya completados del turno en curso.
+ *
+ * Responde 200 siempre: `{ disponible: false, motivo, pasos: [] }` cuando no
+ * hay turno. Cada paso trae solo `{ span_id, parent_id, tipo, nombre,
+ * duracion_ms }`; nunca el contenido de la pregunta ni de los fragmentos, que
+ * es lo que mantiene este endpoint publicable (ver src/api/dashboard.py).
+ *
+ * Timeout corto a proposito: es un adorno informativo y no puede competir por
+ * la conexion con el turno que esta describiendo.
+ */
+export function obtenerProgreso(sesionId) {
+    return pedir(`/api/progress?sesion=${encodeURIComponent(sesionId)}`, { timeoutMs: 4000 });
+}
+
 /** GET /api/geo — el corpus no trae lugar; responde `{ disponible: false, motivo, alternativa }`. */
 export function obtenerGeo() {
     return pedir("/api/geo");

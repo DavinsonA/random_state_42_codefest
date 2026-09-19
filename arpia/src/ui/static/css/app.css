@@ -500,9 +500,59 @@ a {
     50% { opacity: 0.45; }
 }
 
+/* -- progreso en vivo del turno --------------------------------------------
+ *
+ * Lo que se ve mientras el turno corre: un cronometro real y los pasos que el
+ * backend ya reporto (GET /api/progress). Nada se estima: si no llegan datos,
+ * queda el cronometro solo, que sigue siendo informacion cierta.
+ *
+ * Sin colores propios. Reutiliza .chip-agente y los tokens existentes: un
+ * hexadecimal suelto aqui rompe el sistema visual en el primer cambio de tema.
+ */
+
+.progreso {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.progreso-reloj {
+    color: var(--arpia-text-muted);
+    font-size: 12px;
+}
+
+.progreso-pasos {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.progreso-paso {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    /* El paso entra apareciendo, no desplazandose: un salto de layout mientras
+       el usuario lee el anterior es peor que no animar nada. */
+    animation: aparecer 0.25s ease-out;
+}
+
+.progreso-ms {
+    color: var(--arpia-text-muted);
+    font-size: 11px;
+}
+
+@keyframes aparecer {
+    from { opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .pendiente { animation: none; }
     .conversacion { scroll-behavior: auto; }
+    .progreso-paso { animation: none; }
 }
 
 /* -- insignias de estado: texto + color, nunca solo color -- */

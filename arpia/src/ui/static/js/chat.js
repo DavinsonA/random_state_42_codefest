@@ -4,7 +4,7 @@
 // innerHTML: la respuesta puede contener texto de documentos externos
 // (vector de inyeccion, RETO.md §Defensa) y no debe convertirse en marcado.
 
-import { enviarChat, obtenerSalud } from "./api.js";
+import { enviarChat, obtenerProgreso, obtenerSalud } from "./api.js";
 import { enlazarReferencias, hacerCitaInteractiva } from "./referencias.js";
 
 const INTERVALO_SALUD_MS = 60000;
@@ -24,6 +24,37 @@ const NOMBRES_AGENTE = {
     guardian: "Guardián",
     memoria: "Memoria",
 };
+
+// Nombres de span -> lo que lee un analista. "ejecutar.agente_documental" es
+// el identificador interno de una funcion, no una etiqueta de producto.
+//
+// Lo que no este aqui se muestra tal cual: un paso nuevo aparece con su nombre
+// tecnico, que es feo pero honesto. Inventar una etiqueta generica escondería
+// que el sistema hizo algo que esta interfaz no conoce.
+const ETIQUETAS_PASO = {
+    "guardian.revisar_entrada": "Revisando la consulta",
+    "guardian.revisar_salida": "Revisando la respuesta",
+    "memoria.buscar": "Consultando memoria",
+    "orquestador.planificar": "Decidiendo a qué agentes delegar",
+    "ejecutar.agente_documental": "Agente documental",
+    "ejecutar.agente_visualizador": "Agente visualizador",
+    "ejecutar.agente_analitico": "Agente analítico",
+    "documental.redactar": "Redactando el análisis",
+    "visualizador.emitir": "Eligiendo la vista del tablero",
+    "verificador.corregir": "Verificando contra la evidencia",
+    buscar_corpus: "Buscando en el corpus",
+    detalle_documento: "Leyendo un documento",
+    consultar_agregado: "Contando sobre la metadata",
+    componentes_disponibles: "Consultando el catálogo de vistas",
+    emitir_view_spec: "Definiendo la vista",
+    delegar_documental: "Delegando al documental",
+    delegar_visualizacion: "Delegando al visualizador",
+    delegar_analitico: "Delegando al analítico",
+};
+
+//: Cada cuanto se pregunta por el progreso. Suficiente para que se vea vivo sin
+//: convertir un turno de 30 s en 300 peticiones.
+const MS_PROGRESO = 700;
 
 const NOMBRES_CHART = {
     timeline: "Serie anual",
@@ -719,11 +750,98 @@ function agregarPendiente() {
         )
     );
 
+    // Cronometro y lista de pasos. El cronometro es lo unico que se muestra
+    // siempre: mide tiempo real y no depende de que /api/progress conteste.
+    const progreso = el("div", "progreso");
+
+    const cronometro = el("span", "progreso-reloj mono", "0,0 s");
+    progreso.append(cronometro);
+
+    const pasos = el("ul", "progreso-pasos");
+    // El lector de pantalla anuncia cada paso nuevo sin robar el foco.
+    pasos.setAttribute("aria-live", "polite");
+    pasos.setAttribute("aria-label", "Pasos del turno en curso");
+    progreso.append(pasos);
+
+    turno.append(progreso);
+
     conversacion.append(turno);
 
     bajarAlFinal();
 
+    turno._cronometro = cronometro;
+    turno._pasos = pasos;
+
     return turno;
+}
+
+/** Traduce el nombre tecnico de un span. Lo desconocido se muestra tal cual. */
+function etiquetaDePaso(nombre) {
+    return ETIQUETAS_PASO[nombre] || nombre;
+}
+
+/** Sigue el turno en vivo y devuelve la funcion que lo detiene.
+ *
+ * Todo aqui es adorno informativo: si `/api/progress` falla, tarda o viene
+ * vacio, el turno se comporta exactamente como antes. Por eso no hay ningun
+ * `throw` que pueda escapar, y por eso el cronometro se actualiza por separado
+ * de la peticion.
+ *
+ * Solo se pintan pasos que el backend reporto. No se estiman porcentajes ni se
+ * anuncian agentes que todavia no han corrido: una barra de progreso inventada
+ * es un dato inventado con otra forma.
+ */
+function seguirProgreso(turno) {
+    const cronometro = turno._cronometro;
+    const lista = turno._pasos;
+    if (!cronometro || !lista) {
+        return () => {};
+    }
+
+    const inicio = Date.now();
+    const vistos = new Set();
+    let vivo = true;
+    let enVuelo = false;
+
+    const relojId = setInterval(() => {
+        if (!vivo) return;
+        cronometro.textContent = `${((Date.now() - inicio) / 1000).toFixed(1).replace(".", ",")} s`;
+    }, 100);
+
+    async function consultar() {
+        // Sin solapar peticiones: si una tarda mas que el intervalo, se espera.
+        if (!vivo || enVuelo) return;
+        enVuelo = true;
+        try {
+            const datos = await obtenerProgreso(sesionId());
+            if (!vivo || !datos || !datos.disponible) return;
+            for (const paso of datos.pasos || []) {
+                if (vistos.has(paso.span_id)) continue;
+                vistos.add(paso.span_id);
+                const fila = el("li", "progreso-paso");
+                fila.append(el("span", "chip-agente", etiquetaDePaso(paso.nombre)));
+                fila.append(
+                    el("span", "progreso-ms mono", `${Math.round(paso.duracion_ms)} ms`)
+                );
+                lista.append(fila);
+            }
+            bajarAlFinal();
+        } catch {
+            // Silencio deliberado: un fallo del adorno no se le cuenta al
+            // usuario, que esta esperando una respuesta que sigue en camino.
+        } finally {
+            enVuelo = false;
+        }
+    }
+
+    const consultaId = setInterval(consultar, MS_PROGRESO);
+    consultar();
+
+    return () => {
+        vivo = false;
+        clearInterval(relojId);
+        clearInterval(consultaId);
+    };
 }
 
 function renderRespuesta(
@@ -960,6 +1078,11 @@ async function enviar(
     const turno =
         agregarPendiente();
 
+    // Se detiene en el `finally`: tanto si el turno responde como si falla, no
+    // puede quedar un intervalo vivo consultando una sesion que ya termino.
+    const detenerProgreso =
+        seguirProgreso(turno);
+
     try {
         const datos =
             await enviarChat(
@@ -985,6 +1108,8 @@ async function enviar(
             limpio
         );
     } finally {
+        detenerProgreso();
+
         ocupado = false;
 
         botonEnviar.disabled = false;

@@ -132,6 +132,99 @@ def reset() -> None:
         _recientes.clear()
 
 
+# -- turno en curso por sesion ----------------------------------------------
+# Todo lo de aqui abajo es ADITIVO: no altera `Span`, ni `to_dict()`, ni el
+# formato que consume DeepEval. Existe para que `GET /api/progress` pueda decir
+# por donde va un turno que todavia no ha terminado.
+#
+# **Supuesto de despliegue: un solo worker** (`--workers 1` en el Dockerfile,
+# donde es una decision explicita porque cada worker carga su propia copia del
+# indice y del encoder). Este mapa vive en memoria del proceso: con varios
+# workers, el GET del navegador puede caer en un proceso que no atendio ese
+# turno, y el panel se quedaria vacio sin error visible. Si algun dia se
+# levantan mas workers, esto necesita un almacen compartido.
+
+#: Sesiones con turno en curso que se recuerdan a la vez. Acotado por la misma
+#: razon que `MAX_TRAZAS` (AGENTS.md §8): un proceso que corre 24 horas no puede
+#: tener una estructura que crece con cada turno. El tope es holgado frente a
+#: los evaluadores concurrentes que se esperan, y lo que se descarta es lo mas
+#: antiguo, que es justo lo que ya no esta en vuelo.
+MAX_SESIONES = 64
+_sesiones: OrderedDict[str, str] = OrderedDict()
+_sesiones_lock = Lock()
+
+
+def registrar_sesion(sesion_id: str, trace_id: str) -> None:
+    """Anota que esta sesion tiene un turno corriendo bajo esta traza."""
+    if not sesion_id:
+        return
+    with _sesiones_lock:
+        _sesiones.pop(sesion_id, None)  # reinsertar para que cuente como reciente
+        _sesiones[sesion_id] = trace_id
+        while len(_sesiones) > MAX_SESIONES:
+            _sesiones.popitem(last=False)
+
+
+def olvidar_sesion(sesion_id: str) -> None:
+    """El turno termino. Se llama tambien cuando falla: sin esto, el panel
+    seguiria mostrando el turno anterior como si siguiera en vuelo."""
+    with _sesiones_lock:
+        _sesiones.pop(sesion_id, None)
+
+
+def olvidar_sesiones() -> None:
+    """Vacia el mapa. Solo para pruebas."""
+    with _sesiones_lock:
+        _sesiones.clear()
+
+
+def trace_de_sesion(sesion_id: str) -> str | None:
+    with _sesiones_lock:
+        return _sesiones.get(sesion_id)
+
+
+def sesiones_en_curso() -> int:
+    with _sesiones_lock:
+        return len(_sesiones)
+
+
+#: Los unicos campos de un `Span` que pueden salir por una URL publica.
+#:
+#: Lista BLANCA, y la diferencia importa: con una lista negra, un campo nuevo en
+#: `Span` se publicaria solo el dia que alguien lo anada. `input` y `output`
+#: llevan el texto de las preguntas y los fragmentos del corpus —es la razon por
+#: la que `GET /api/trace` esta cerrado tras `ARPIA_DEBUG_TRACE`— y
+#: `start_ms`/`end_ms` son relojes del proceso que no aportan nada al panel.
+_CAMPOS_PUBLICOS = ("span_id", "parent_id")
+
+
+def pasos_de_traza(trace_id: str) -> list[dict[str, Any]] | None:
+    """Proyeccion publicable de una traza: que paso, de quien colgaba y cuanto
+    tardo. Nunca su contenido.
+
+    Devuelve None si la traza ya no esta en el buffer.
+
+    La lista de spans se copia y la copia se proyecta fuera del lock. El span
+    que este cerrandose en otro hilo aparecera en la llamada siguiente: para un
+    panel que se refresca cada segundo, ver un paso con un instante de retraso
+    es correcto, y bloquear el hilo del turno para leerlo no lo seria.
+    """
+    with _recientes_lock:
+        trace = _recientes.get(trace_id)
+        spans = list(trace.spans) if trace else None
+    if spans is None:
+        return None
+    return [
+        {
+            **{campo: getattr(s, campo) for campo in _CAMPOS_PUBLICOS},
+            "tipo": s.type,
+            "nombre": s.name,
+            "duracion_ms": round(max(s.end_ms - s.start_ms, 0.0), 1),
+        }
+        for s in spans
+    ]
+
+
 class span:  # noqa: N801 - nombre en minuscula deliberado, uso como `with tracing.span(...)`
     """Context manager que registra un span en la traza activa.
 

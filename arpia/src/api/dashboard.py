@@ -385,6 +385,46 @@ def document(
     )
 
 
+@router.get("/progress")
+def progress(sesion: str = "") -> JSONResponse:
+    """Por donde va el turno que esta corriendo ahora en esta sesion.
+
+    Existe porque un turno tarda decenas de segundos y la interfaz solo podia
+    mostrar un texto latiendo. Con esto ensena los agentes y las herramientas
+    que ya reportaron, con datos reales: nada se estima ni se simula, y un paso
+    solo aparece cuando su span cerro de verdad.
+
+    **Abierto en produccion, y por eso NO devuelve contenido.** `GET /api/trace`
+    esta cerrado tras `ARPIA_DEBUG_TRACE` porque los spans llevan el texto de la
+    pregunta y los fragmentos del corpus. Este endpoint proyecta cada span sobre
+    una lista blanca —identificador, padre, tipo, nombre y duracion— definida en
+    `tracing.pasos_de_traza`, junto al propio `Span`, para que un campo nuevo no
+    se publique solo el dia que alguien lo anada. Devolver aqui lo que alli se
+    cerro seria publicarlo por la puerta de atras, en la URL que evalua ADL.
+
+    Funciona porque `POST /chat` corre en el threadpool (`run_in_threadpool` en
+    `main.py`): el bucle de eventos queda libre y este GET responde mientras el
+    turno sigue en vuelo.
+
+    Siempre 200, como el resto del modulo: es un adorno informativo, y la
+    interfaz no debe distinguir "no hay turno" de un fallo.
+    """
+    if not sesion:
+        return _error("falta el parametro `sesion`", pasos=[])
+
+    trace_id = tracing.trace_de_sesion(sesion)
+    if not trace_id:
+        return _error("no hay ningun turno en curso para esa sesion", pasos=[])
+
+    pasos = tracing.pasos_de_traza(trace_id)
+    if pasos is None:
+        return _error("la traza del turno ya no esta en memoria", pasos=[])
+
+    return JSONResponse(
+        content={"disponible": True, "trace_id": trace_id, "pasos": pasos}
+    )
+
+
 @router.get("/trace/{trace_id}")
 def trace(trace_id: str) -> JSONResponse:
     """Arbol de ejecucion de un turno: que se llamo, con que y cuanto tardo.

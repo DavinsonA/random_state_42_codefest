@@ -213,10 +213,25 @@ def invalid_input_response() -> AgentResponse:
 
 
 def run_chat(texto: str, session_id: str) -> AgentResponse:
-    """Ejecuta un turno completo. Bloqueante: llamar desde un thread."""
+    """Ejecuta un turno completo. Bloqueante: llamar desde un thread.
+
+    Este envoltorio existe solo para el registro de la sesion, y el `finally`
+    es la razon de separarlo: `_turno` nunca deberia lanzar —esa es su regla
+    dura— pero si algun dia lo hiciera, una sesion que se quedara registrada
+    haria que el panel de progreso mostrara para siempre un turno terminado.
+    Un adorno informativo no puede sobrevivir al turno que describe.
+    """
+    tracing.registrar_sesion(session_id, tracing.start_trace())
+    try:
+        return _turno(texto, session_id)
+    finally:
+        tracing.olvidar_sesion(session_id)
+
+
+def _turno(texto: str, session_id: str) -> AgentResponse:
+    """El turno propiamente dicho. La traza ya esta abierta."""
     start = time.perf_counter()
     s = get_settings()
-    tracing.start_trace()
     usage.start_request()
     turnlog.start_turn()
     budget.start_turn(s.turn_budget_s)
