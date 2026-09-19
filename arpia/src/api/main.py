@@ -14,9 +14,13 @@ Los esquemas viven en `src/api/contracts.py`, no aqui.
 
 from __future__ import annotations
 
-from fastapi import FastAPI, Response
+import asyncio
 
-from src.api.contracts import HealthResponse, UsageResponse
+from fastapi import FastAPI, Request, Response
+
+from src.api import chat as chat_service
+from src.api.contracts import ChatResponse, HealthResponse, UsageResponse
+from src.api.session import attach_session, resolve_session
 from src.config import get_logger, get_settings
 from src.observability import tracing, usage
 from src.tools.registry import registry
@@ -55,6 +59,26 @@ def _check_gateway(base_url: str) -> tuple[bool, str | None]:
 
 
 # -- endpoints -----------------------------------------------------------
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(request: Request, response: Response) -> ChatResponse:
+    """Un turno de conversacion. Este es el endpoint que evalua ADL.
+
+    Acepta JSON (`{"texto": "...", "sesion_id": "..."}`, con alias) o texto
+    plano. Responde en el formato de la especificacion §2.4. El `sesion_id`
+    se resuelve segun `src/api/session.py` y se devuelve en `X-Session-Id`.
+    Nunca devuelve 500: un fallo interno queda en `metadata.estado`.
+    """
+    req = chat_service.parse_body(await request.body())
+    if req is None:
+        return chat_service.invalid_input_response()
+
+    s = get_settings()
+    session_id, is_new = resolve_session(req.sesion_id, request)
+    attach_session(response, session_id, is_new, s.session_ttl_s)
+    # El grafo es bloqueante: fuera del event loop para no frenar /health.
+    return await asyncio.to_thread(chat_service.run_chat, req.texto, session_id)
 
 
 @app.get("/health", response_model=HealthResponse)

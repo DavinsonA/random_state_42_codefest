@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 
+from src.observability import turnlog
 from src.retrieval.index import VectorIndex
 from src.tools.registry import registry
 
@@ -53,6 +54,9 @@ def search_corpus(query: str, k: int = 8) -> str:
         f"[{i}] ({hit.citation()}) score={hit.score:.3f}\n{hit.text}"
         for i, hit in enumerate(hits, start=1)
     ]
+    # Lo que ADL llama `retrieval_context`: el texto que se le entrego al modelo,
+    # con su procedencia para que las citas del modelo tengan respaldo.
+    turnlog.add_context([f"({hit.citation()}) {hit.text}" for hit in hits])
     return "\n\n".join(bloques)
 
 

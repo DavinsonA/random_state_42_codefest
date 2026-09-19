@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import functools
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from src.config import get_logger
-from src.observability import tracing
+from src.observability import tracing, turnlog
 
 log = get_logger(__name__)
 
@@ -38,7 +39,10 @@ class ToolRegistry:
     """Coleccion de tools disponibles para el agente."""
 
     _tools: dict[str, Callable] = field(default_factory=dict)
-    calls: list[ToolCall] = field(default_factory=list)
+    # Solo para depuracion local (run_node, UI). Acotado: un servidor de larga
+    # vida no puede acumular una entrada por cada llamada. El detalle POR TURNO
+    # que consume `/chat` vive en `observability.turnlog`.
+    calls: deque[ToolCall] = field(default_factory=lambda: deque(maxlen=200))
 
     def register(
         self, fn: Callable | None = None, *, span_type: tracing.SpanType = "tool"
@@ -61,12 +65,14 @@ class ToolRegistry:
                     result = fn(*args, **kwargs)
                     ok, error = True, ""
                     sp.set_output(str(result)[:2000])
+                    turnlog.record_tool_call(fn.__name__, call_input, str(result))
                     return result
                 except Exception as exc:  # noqa: BLE001 - frontera deliberada
                     ok, error = False, f"{type(exc).__name__}: {exc}"
                     log.warning("tool '%s' fallo: %s", fn.__name__, error)
                     message = f"[error en la herramienta '{fn.__name__}': {error}]"
                     sp.set_output(message)
+                    turnlog.record_tool_call(fn.__name__, call_input, message)
                     return message
                 finally:
                     self.calls.append(
