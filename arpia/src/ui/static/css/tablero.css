@@ -292,7 +292,9 @@
     min-width: 0;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-content: start;
+    /* las filas se estiran hasta el alto de la columna del asistente: con pocos paneles no
+       queda un hueco debajo (con muchos, el contenido manda y no hay nada que estirar) */
+    align-content: stretch;
     gap: 18px;
 }
 
@@ -382,7 +384,10 @@
    que no crezca con el propio canvas */
 .pagina-tablero .lienzo {
     position: relative;
-    height: 250px;
+    /* crece para llenar el panel; 250 px es el minimo. `min-height` explicito: sin el, el
+       minimo automatico es el alto del canvas y el grafico no podria encogerse */
+    flex: 1 1 250px;
+    min-height: 250px;
     /* el canvas nunca se sale de su caja ni tapa lo que va debajo (botones) */
     overflow: hidden;
 }
@@ -530,6 +535,11 @@
 .pagina-tablero .grafico.alto .tabla-caja {
     height: 520px;
     max-height: none;
+}
+
+.pagina-tablero .grafico.alto .lienzo {
+    flex-basis: 520px;
+    min-height: 520px;
 }
 
 .grafico-cuerpo {
