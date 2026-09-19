@@ -4,11 +4,60 @@
  * Las transparencias se derivan con color-mix() sobre un token, nunca con rgba().
  */
 
+/* =========================
+   TIPOGRAFIA VENDORIZADA
+   =========================
+ * Inter 4.1 (rsms/inter) y JetBrains Mono 2.304 (JetBrains/JetBrainsMono),
+ * ambas SIL OFL 1.1 (licencias en fonts/<familia>/OFL.txt). Estaticas, sin
+ * italicas, subseteadas a latin + latin-ext con fontTools. Nunca CDN: la UI
+ * se ve igual en todo sistema operativo y no depende de la red del venue.
+ */
+
+@font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/static/fonts/inter/Inter-Regular.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("/static/fonts/inter/Inter-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("/static/fonts/inter/Inter-Bold.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/static/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("/static/fonts/jetbrains-mono/JetBrainsMono-Bold.woff2") format("woff2");
+}
+
 :root {
     --radio: 4px;
     --radio-sm: 3px;
-    --fuente: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-    --fuente-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+    --fuente: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --fuente-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
     --ancho-chat: 880px;
     --transicion: 150ms ease;
 }
@@ -54,6 +103,7 @@ h1, h2, h3, p, ul, ol, dl, dd, blockquote {
 code,
 .mono {
     font-family: var(--fuente-mono);
+    font-variant-ligatures: none;  /* un doc_id/chunk_id se muestra glifo a glifo */
     font-size: 0.92em;
 }
 
@@ -157,25 +207,50 @@ a {
 }
 
 .marca {
+    position: relative;
     display: flex;
-    align-items: baseline;
-    gap: 12px;
+    align-items: center;
+    width: 350px;
+    height: 80px;
     min-width: 0;
 }
 
-.marca-nombre {
-    font-size: 16px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
+.marca-fac {
+    width: 180px;
+    height: 50px;
+    object-fit: contain;
+    display: block;
+    flex-shrink: 0;
+    position: absolute;
+    left: 0;
+    top: 15px;
+    z-index: 1;
+}
+
+.marca-logo {
+    width: 160px;
+    height: 70px;
+    object-fit: contain;
+    display: block;
+    flex-shrink: 0;
+    position: absolute;
+    left: 140px;
+    top: 0;
+    z-index: 2;
 }
 
 .marca-sub {
-    color: var(--arpia-text-secondary);
-    font-size: 12px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    width: 300px;
+    height: 60px;
+    object-fit: contain;
+    display: block;
+    flex-shrink: 0;
+    position: absolute;
+    left: 300px;
+    top: 20px;
+    z-index: 3;
 }
+
 
 .barra-acciones {
     display: flex;
@@ -302,6 +377,7 @@ a {
 .fenomeno-id {
     color: var(--color-fenomeno, var(--arpia-text-secondary));
     font-family: var(--fuente-mono);
+    font-variant-ligatures: none;  /* un doc_id/chunk_id se muestra glifo a glifo */
     font-weight: 700;
 }
 
@@ -474,6 +550,7 @@ a {
     border-left: 3px solid var(--color-fenomeno) !important;
     color: var(--arpia-text);
     font-family: var(--fuente-mono);
+    font-variant-ligatures: none;  /* un doc_id/chunk_id se muestra glifo a glifo */
 }
 
 .vista-nota {
@@ -585,6 +662,8 @@ a {
 .cifra dd {
     color: var(--arpia-text);
     font-family: var(--fuente-mono);
+    font-variant-ligatures: none;  /* un doc_id/chunk_id se muestra glifo a glifo */
+    font-variant-numeric: tabular-nums;  /* tokens/latencia no bailan al actualizarse */
     font-size: 12px;
 }
 
@@ -663,3 +742,5 @@ a {
         align-items: flex-start;
     }
 }
+
+
