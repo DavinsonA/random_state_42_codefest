@@ -776,10 +776,37 @@ Todos devuelven **HTTP 200**. Un fallo o un dato inexistente llega como
 | `GET /api/evidence/{chunk_id}` | — | `chunk_id`, `doc_id`, `texto`, `fuente`, `organizacion`, `anio`, `formato`, `fenomeno`, `fenomeno_nombre`, `posicion`, `total_fragmentos` |
 | `GET /api/document/{doc_id}` | `chunk_id` (centro y fragmento marcado `citado`), `posicion` (centro alternativo, def. 0), `ventana` (fragmentos a cada lado, 0–10, def. 2) | cabecera (`formato`, `fuente`, `organizacion`, `anio`, `fenomeno`, `total_fragmentos`), `desde`, `hasta`, `hay_anterior`, `hay_siguiente` y `fragmentos[{chunk_id, posicion, texto, truncado, citado}]` |
 | `GET /api/trace/{trace_id}` | — | `spans` del turno (últimas 50 trazas). **Solo con `ARPIA_DEBUG_TRACE`**; si no, `disponible: false` |
-| `POST /api/view` | cuerpo: un `ViewSpec` | los datos ya resueltos: `filas`, `total`, `cobertura`, `aviso`, `nota`. Valida con el mismo esquema cerrado que el visualizador; una vista temporal agrupa por año |
+| `POST /api/view` | cuerpo: un `ViewSpec` | la vista lista para pintar (ver abajo). Valida con el mismo esquema cerrado que el visualizador; una vista temporal agrupa por año |
 
 Cada cifra viene con los `doc_id` que la sustentan, y `/api/evidence` abre el fragmento
 exacto: es la trazabilidad que exige `RETO.md`.
+
+### `POST /api/view` — la vista lista para pintar
+
+Una sola llamada devuelve todo lo que el tablero necesita; la GUI ya no arma series ni pide los hallazgos aparte.
+
+```json
+{
+  "disponible": true, "chart": "donut", "group_by": "organizacion", "serie_por": "fenomeno",
+  "titulo": "…", "metrica": "conteo_documentos", "fenomenos": ["F3"],
+  "categorias": ["Alertas_Tempranas", "SIPRI", "RESDAL"],
+  "series": [{"clave": "F3", "etiqueta": "F3 · Dinámicas Territoriales",
+              "valores": [425, 128, 107],
+              "doc_ids": [["F3-ALERTAS-001"], ["F3-SIPRI-015"], ["F3-RESDAL-099"]]}],
+  "categorias_omitidas": 0, "series_omitidas": 0,
+  "total": 888, "cobertura": {"…": "…"}, "aviso": "",
+  "hallazgos": [{"texto": "Alertas Tempranas y SIPRI acumulan 553 de 888 documentos (62 %)…",
+                 "soporte": ["Alertas_Tempranas", "SIPRI"], "doc_ids": ["F3-ALERTAS-001", "…"]}],
+  "complementarias": [ /* ViewSpec, como mucho 2 */ ],
+  "filas": [ /* {clave, valor, doc_ids}: formato de siempre, se conserva */ ]
+}
+```
+
+- **`categorias` × `series`.** `valores[i]` y `doc_ids[i]` corresponden a `categorias[i]`. Las categorías van cronológicas si se agrupa por año y por total descendente en los demás casos. `doc_ids` es una muestra de 10 por celda.
+- **`serie_por`.** Si se agrupa por algo distinto del fenómeno, hay una serie por fenómeno (F1, F2, F3 en ese orden, para que su color no cambie entre vistas). Si se agrupa por fenómeno, hay una sola serie `total`.
+- **Topes declarados, no silenciosos.** Como mucho 25 categorías (salvo el año) y 8 series; lo que se recorta se cuenta en `categorias_omitidas` y `series_omitidas`.
+- **`hallazgos` y `complementarias`** salen del mismo código que usa `/chat` (`dashboard.apoyo_de_vista`): el mismo gráfico dice lo mismo venga del chat o de un clic. Cada hallazgo trae `soporte` (categorías sobre las que se calculó) y `doc_ids`.
+- **Degrada sin caerse.** Si fallan las series o el apoyo, la vista sale igual con esos campos vacíos y `filas` intacto.
 
 ### Referencias: ver de dónde sale cada afirmación (hecho en backend y en el chat)
 

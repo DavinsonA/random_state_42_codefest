@@ -39,6 +39,20 @@ def _error(motivo: str, **extra: Any) -> JSONResponse:
     return JSONResponse(status_code=200, content={"disponible": False, "motivo": motivo, **extra})
 
 
+#: Nombre de cada fenomeno tal como lo lee el analista.
+NOMBRE_FENOMENO = {
+    "F1": "IA y Capacidades Estratégicas",
+    "F2": "Seguridad del Entorno Espacial",
+    "F3": "Dinámicas Territoriales",
+}
+
+
+def _etiqueta_serie(serie_por: str | None, clave: str) -> str:
+    if serie_por == "fenomeno" and clave in NOMBRE_FENOMENO:
+        return f"{clave} · {NOMBRE_FENOMENO[clave]}"
+    return "Total" if clave == "total" else clave.replace("_", " ")
+
+
 @router.get("/components")
 def components() -> JSONResponse:
     """Catalogo de componentes y dimensiones con datos reales detras.
@@ -182,6 +196,46 @@ def filas_de_vista(vista: Any) -> list[dict[str, Any]]:
     return list(datos.get("filas") or [])
 
 
+def serie_efectiva(vista: Any, group_by: str) -> str | None:
+    """Que dimension separa las series de una vista.
+
+    Sin `serie_por` explicito, una vista agrupada por otra cosa que el fenomeno
+    trae una serie por fenomeno: es lo que los graficos apilan y colorean, y
+    hasta ahora lo armaba la GUI con una peticion por fenomeno.
+    """
+    return "fenomeno" if group_by != "fenomeno" else None
+
+
+def _a_fila(f: dict[str, Any]) -> Any:
+    from src.agents.hallazgos import Fila
+
+    return Fila(
+        clave=str(f.get("clave", "")),
+        valor=int(f.get("valor") or 0),
+        doc_ids=[str(d) for d in (f.get("doc_ids") or [])],
+    )
+
+
+def apoyo_de_vista(vista: Any, crudas: list[dict[str, Any]]) -> tuple[list[Any], list[Any]]:
+    """Vistas de apoyo y hallazgos de una vista ya agregada. CERO tokens.
+
+    Es UN solo camino para `/chat` y `POST /api/view`: el chat lo usa al cerrar
+    el turno y el tablero al pintar una vista que nacio de un clic. Si fueran
+    dos copias, el mismo grafico diria cosas distintas segun de donde llegue.
+
+    Returns:
+        `(vistas, hallazgos)`. `vistas` empieza SIEMPRE por `vista`.
+    """
+    from src.agents import compositor, hallazgos
+
+    filas = [_a_fila(f) for f in crudas]
+    return compositor.componer(vista, filas), hallazgos.describir(filas, dimension_efectiva(vista))
+
+
+def _hallazgo_json(h: Any) -> dict[str, Any]:
+    return {"texto": h.texto, "soporte": list(h.soporte), "doc_ids": list(h.doc_ids)}
+
+
 @router.post("/view")
 def view(spec: dict[str, Any]) -> JSONResponse:
     """Resuelve un `ViewSpec` a los datos que el tablero debe pintar.
@@ -202,9 +256,11 @@ def view(spec: dict[str, Any]) -> JSONResponse:
         spec: el `ViewSpec` tal cual lo emitio el agente.
 
     Returns:
-        `{disponible, chart, titulo, metrica, group_by, filas, total, cobertura,
-        aviso, nota}`. `filas` viene ordenada como corresponde al componente:
-        cronologica en las vistas temporales, de mayor a menor en el resto.
+        La vista lista para pintar: `categorias` y `series` (una por fenomeno si
+        no se agrupa por el), `hallazgos` con los `doc_id` que los sustentan,
+        `complementarias` (vistas de apoyo, como `ViewSpec`), `cobertura` y `aviso`.
+        Se conserva `filas`: cronologica en las vistas temporales, de mayor a
+        menor en el resto.
     """
     from pydantic import ValidationError
 
@@ -258,6 +314,25 @@ def view(spec: dict[str, Any]) -> JSONResponse:
         )
     aviso = " ".join([*medidos, vista.nota]).strip()
 
+    desde = int(vista.desde) if vista.desde else None
+    hasta = int(vista.hasta) if vista.hasta else None
+    serie_por = serie_efectiva(vista, group_by)
+
+    # Lo que hay detras de una vista es apoyo: si falla, la vista sale igual.
+    try:
+        matriz = aggregates.agregar_series(
+            metrica=vista.metrica,
+            group_by=group_by,  # type: ignore[arg-type]
+            serie_por=serie_por,  # type: ignore[arg-type]
+            fenomenos=list(vista.fenomenos) or None,
+            desde=desde,
+            hasta=hasta,
+        )
+        vistas, hallazgos = apoyo_de_vista(vista, datos["filas"])
+    except Exception as exc:  # noqa: BLE001 - el tablero nunca recibe un 500
+        log.warning("la vista %s salio sin series ni hallazgos: %s", vista.chart, exc)
+        matriz, vistas, hallazgos = None, [vista], []
+
     return JSONResponse(
         content={
             "disponible": True,
@@ -265,11 +340,22 @@ def view(spec: dict[str, Any]) -> JSONResponse:
             "titulo": vista.titulo,
             "metrica": vista.metrica,
             "group_by": group_by,
+            "serie_por": serie_por,
             "fenomenos": list(vista.fenomenos),
+            "categorias": matriz["categorias"] if matriz else [],
+            "series": [
+                {**s, "etiqueta": _etiqueta_serie(serie_por, s["clave"])} for s in matriz["series"]
+            ]
+            if matriz
+            else [],
+            "categorias_omitidas": matriz["categorias_omitidas"] if matriz else 0,
+            "series_omitidas": matriz["series_omitidas"] if matriz else 0,
             "filas": filas,
             "total": datos["total"],
             "cobertura": cobertura,
             "aviso": aviso,
+            "hallazgos": [_hallazgo_json(h) for h in hallazgos],
+            "complementarias": [v.model_dump(exclude_none=True) for v in vistas[1:]],
         }
     )
 
@@ -458,9 +544,7 @@ def progress(sesion: str = "") -> JSONResponse:
     if pasos is None:
         return _error("la traza del turno ya no esta en memoria", pasos=[])
 
-    return JSONResponse(
-        content={"disponible": True, "trace_id": trace_id, "pasos": pasos}
-    )
+    return JSONResponse(content={"disponible": True, "trace_id": trace_id, "pasos": pasos})
 
 
 @router.get("/trace/{trace_id}")

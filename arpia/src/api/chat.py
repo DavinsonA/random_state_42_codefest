@@ -217,20 +217,11 @@ def _componer_tablero(vista: ViewSpec | None) -> tuple[list[ViewSpec], list[str]
     if vista is None:
         return [], []
     try:
-        from src.agents import compositor, hallazgos
-        from src.api.dashboard import dimension_efectiva, filas_de_vista
+        from src.agents import compositor
+        from src.api.dashboard import apoyo_de_vista, filas_de_vista
 
-        crudas = filas_de_vista(vista)
-        filas = [
-            hallazgos.Fila(
-                clave=str(f.get("clave", "")),
-                valor=int(f.get("valor") or 0),
-                doc_ids=[str(d) for d in (f.get("doc_ids") or [])],
-            )
-            for f in crudas
-        ]
-        vistas = compositor.componer(vista, filas)
-        textos = [h.texto for h in hallazgos.describir(filas, dimension_efectiva(vista))]
+        vistas, hallazgos = apoyo_de_vista(vista, filas_de_vista(vista))
+        textos = [h.texto for h in hallazgos]
         turnlog.record_agent(compositor.AGENTE)
         return vistas, textos
     except Exception as exc:  # noqa: BLE001 - frontera: el apoyo nunca tumba el turno
