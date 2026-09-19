@@ -311,7 +311,16 @@ def revisar_entrada(texto: str) -> Veredicto:
 #: Sustituye una instruccion encontrada dentro de un documento. Se MARCA, no se
 #: borra en silencio: `RETO.md` exige trazabilidad, y un analista que lea la
 #: evidencia tiene derecho a saber que el sistema intervino ese fragmento.
-MARCA_NEUTRALIZADA = "[instruccion en el documento, neutralizada por el guardian]"
+#:
+#: No nombra al guardian ni al mecanismo. Esta marca viaja dentro del
+#: `retrieval_context` que ADL evalua y el modelo la parafrasea al usuario
+#: —medido: dijo "su contenido fue neutralizado"—. El REGISTRO de `voz.py`
+#: prohibe mencionar la estructura interna, asi que la marca describe el HECHO,
+#: que es lo que el analista necesita, y no el componente que lo hizo.
+MARCA_NEUTRALIZADA = (
+    "[fragmento omitido: contenia texto dirigido a un sistema automatico, "
+    "no contenido documental]"
+)
 
 _FIN_DE_ORACION = re.compile(r"[.!?\n]")
 
