@@ -15,3 +15,6 @@ data/
 !data/.gitkeep
 *.faiss
 *.jsonl
+
+# Documentos ---
+docs/
